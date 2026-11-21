@@ -33,7 +33,7 @@ public class UpdateManagerTest {
     @Test
     public void testSafeHttpsUrlValidation() {
         // Valid HTTPS
-        assertTrue(UpdateManager.isSafeHttpsUrl("https://api.github.com/repos/david/lunvoryx-player/releases/latest"));
+        assertTrue(UpdateManager.isSafeHttpsUrl("https://api.github.com/repos/ilovemygf09/Lunvoryx-Player/releases/latest"));
         assertTrue(UpdateManager.isSafeHttpsUrl("https://github.com/user/repo/releases/download/v1.1.0/LunvoryxPlayer-1.1.0.apk"));
 
         // Insecure or invalid protocols

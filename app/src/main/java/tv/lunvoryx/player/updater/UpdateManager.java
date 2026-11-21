@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
 
 public final class UpdateManager {
     public static final String PREF_UPDATE_URL = "update_check_url";
-    public static final String DEFAULT_UPDATE_URL = "https://api.github.com/repos/david/lunvoryx-player/releases/latest";
+    public static final String DEFAULT_UPDATE_URL = "https://api.github.com/repos/ilovemygf09/Lunvoryx-Player/releases/latest";
     private static final String PREFS_NAME = "updates";
     private static final String KEY_SUPPRESSED_UNTIL = "suppressed_until";
     public static final long MAX_APK_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB safety threshold
