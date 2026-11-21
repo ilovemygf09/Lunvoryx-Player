@@ -101,15 +101,11 @@ adb shell am start -n tv.lunvoryx.player/.MainActivity
 
 - **Sin Telemetría:** Lunvoryx Player no recopila datos de navegación, telemetría ni hábitos de consumo.
 - **Almacenamiento Local Aislado:** Todas las listas, favoritos y claves se guardan en el almacenamiento privado de la app (`Context.MODE_PRIVATE`).
-- **Verificación Criptográfica:** Consulta nuestro informe completo en [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
-- **Política de Vulnerabilidades:** Consulta [SECURITY.md](SECURITY.md).
+- **Política de Vulnerabilidades y Seguridad:** Consulta [SECURITY.md](SECURITY.md).
 
 ---
 
-## Publicación y Contribución
+## Registro y Recursos
 
-- **Guía paso a paso para GitHub y Releases:** Consulta [GUIA_GITHUB.md](GUIA_GITHUB.md).
 - **Registro de cambios por versión:** Consulta [CHANGELOG.md](CHANGELOG.md).
-- **Pautas para colaboradores y Pull Requests:** Consulta [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Procedencia de recursos y medios libres:** Consulta [SOURCES.md](SOURCES.md).
-- **Informe de pruebas y validación:** Consulta [VALIDATION.md](VALIDATION.md).

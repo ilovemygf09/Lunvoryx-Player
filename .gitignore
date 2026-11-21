@@ -37,3 +37,12 @@ desktop.ini
 artifacts/
 *.log
 *.tmp
+
+# Internal audit reports and private development guides
+INFORME_COMPLETO.md
+GUIA_GITHUB.md
+VALIDATION.md
+CONTRIBUTING.md
+FINAL_RELEASE_VERIFICATION.md
+PROJECT_CLEANUP.md
+SECURITY_AUDIT.md
