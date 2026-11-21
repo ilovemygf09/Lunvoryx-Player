@@ -1,0 +1,22 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#EBEBF1</item>
+        <item name="android:windowBackground">#0B0D18</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorControlHighlight">#335B6075</item>
+        <item name="android:navigationBarColor">#0B0D18</item>
+        <item name="android:alertDialogTheme">@style/LunvoryxDialog</item>
+    </style>
+    <style name="LunvoryxDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialog_background</item>
+        <item name="android:colorAccent">#EBEBF1</item>
+        <item name="android:textColorPrimary">#F8F8FB</item>
+        <item name="android:textColorSecondary">#B5B5C4</item>
+        <item name="android:colorControlHighlight">#667D809A</item>
+    </style>
+</resources>

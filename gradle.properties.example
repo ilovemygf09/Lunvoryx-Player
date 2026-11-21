@@ -1,0 +1,17 @@
+# Lunvoryx Player - Plantilla de propiedades de configuración
+# Copia este archivo a gradle.properties o configura estas variables en tus secretos de CI/CD.
+# NUNCA subas tus contraseñas reales ni tu archivo de almacén (.keystore/.jks) a GitHub.
+
+# Parámetros de compilación y optimización JVM
+org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8
+org.gradle.parallel=true
+org.gradle.caching=true
+android.useAndroidX=true
+android.builtInKotlin=false
+android.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE
+
+# Firma de producción APK Release (Opcional para compilación local / CI)
+# RELEASE_STORE_FILE=c:/ruta/hacia/tu-almacen-produccion.jks
+# RELEASE_STORE_PASSWORD=TuPasswordDeAlmacen
+# RELEASE_KEY_ALIAS=lunvoryx-key
+# RELEASE_KEY_PASSWORD=TuPasswordDeClave

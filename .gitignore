@@ -1,0 +1,39 @@
+# Gradle & Build outputs
+.gradle/
+build/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local configuration & environment
+local.properties
+.local/
+.android/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# Signing keys & secrets (CRITICAL: Never commit to Git)
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.pk8
+*.env
+secrets.xml
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
+
+# Local test artifacts & temporary emulator dumps
+artifacts/
+*.log
+*.tmp
