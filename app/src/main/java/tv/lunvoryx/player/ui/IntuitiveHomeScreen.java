@@ -32,6 +32,7 @@ public final class IntuitiveHomeScreen extends LinearLayout {
     private final Context context;
     private final PlaylistRepository repository;
     private final Listener listener;
+    private FrameLayout liveCard;
 
     public IntuitiveHomeScreen(Context context, PlaylistRepository repository, Listener listener) {
         super(context);
@@ -52,7 +53,7 @@ public final class IntuitiveHomeScreen extends LinearLayout {
         addView(grid, gp);
 
         // 1. Left Giant Card: TV en vivo (44% width)
-        FrameLayout liveCard = buildLiveTvCard();
+        liveCard = buildLiveTvCard();
         LinearLayout.LayoutParams lcp = new LinearLayout.LayoutParams(0, -1, 0.44f);
         lcp.rightMargin = dp(context, 16);
         grid.addView(liveCard, lcp);
@@ -116,12 +117,22 @@ public final class IntuitiveHomeScreen extends LinearLayout {
 
         // Footer at bottom
         TextView footer = new TextView(context);
-        footer.setText("Lunvoryx Player · v1.1.0");
+        String vName = "1.1.1";
+        try {
+            vName = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
+        } catch (Exception ignored) {}
+        footer.setText("Lunvoryx Player · v" + vName);
         footer.setTextSize(11.5f);
         footer.setTextColor(0xFF6A7B95);
         LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(-2, -2);
         fp.topMargin = dp(context, 12);
         addView(footer, fp);
+
+        post(() -> liveCard.requestFocus());
+    }
+
+    public View getFirstFocusable() {
+        return liveCard;
     }
 
     private FrameLayout buildLiveTvCard() {

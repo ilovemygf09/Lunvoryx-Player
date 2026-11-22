@@ -44,7 +44,7 @@ public final class IntuitiveTopBar extends LinearLayout {
     private void init() {
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
-        setPadding(dp(context, 24), dp(context, 12), dp(context, 24), dp(context, 12));
+        setPadding(dp(context, 24), dp(context, 6), dp(context, 24), dp(context, 6));
 
         // 1. Back button (for details screens)
         backBtn = new FrameLayout(context);
@@ -76,8 +76,8 @@ public final class IntuitiveTopBar extends LinearLayout {
         bp.rightMargin = dp(context, 16);
         addView(brand, bp);
 
-        // Divider
-        addView(createDivider());
+        // Divider 1
+        addView(createDivider(), createDividerLayoutParams());
 
         // 3. Navigation Tabs (Inicio, TV en vivo, Películas, Series)
         tabsContainer = new LinearLayout(context);
@@ -90,16 +90,17 @@ public final class IntuitiveTopBar extends LinearLayout {
 
         buildTabs();
 
-        // Divider
-        addView(createDivider());
+        // Divider 2
+        addView(createDivider(), createDividerLayoutParams());
 
         // Spacer to push search and expiration to the right
         View spacer = new View(context);
-        addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
+        addView(spacer, new LinearLayout.LayoutParams(0, dp(context, 1), 1.0f));
 
         // 4. Search Bar Pill
         searchPill = buildSearchPill();
-        addView(searchPill);
+        LinearLayout.LayoutParams spp = new LinearLayout.LayoutParams(-2, dp(context, 34));
+        addView(searchPill, spp);
 
         // 5. Expiration / Playlist status Badge
         expiryBadge = buildExpiryBadge();
@@ -111,10 +112,14 @@ public final class IntuitiveTopBar extends LinearLayout {
     private View createDivider() {
         View div = new View(context);
         div.setBackgroundColor(0x338A9BB8);
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(dp(context, 1), dp(context, 20));
-        dp.leftMargin = dp(context, 8);
-        dp.rightMargin = dp(context, 8);
         return div;
+    }
+
+    private LinearLayout.LayoutParams createDividerLayoutParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, 1), dp(context, 20));
+        lp.leftMargin = dp(context, 8);
+        lp.rightMargin = dp(context, 8);
+        return lp;
     }
 
     private void buildTabs() {

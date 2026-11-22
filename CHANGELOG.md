@@ -5,6 +5,17 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
+## [1.1.1] - 2026-11-22
+
+### 🐛 Correcciones en Modo Intuitivo (Layout y Navegación D-Pad)
+- **Corrección de restricciones en barra superior (`IntuitiveTopBar`):** Asignación explícita de `LayoutParams` en los separadores visuales y altura fija de cabecera (`58 dp`). Se elimina el fallo por el cual los divisores se expandían verticalmente empujando la cuadrícula de inicio fuera de pantalla.
+- **Foco inicial inmediato para mando a distancia (D-Pad):** Autoenfoque garantizado en la tarjeta destacada de *TV en vivo* al abrir el Inicio y en la primera fila de *Ajustes*, resolviendo la falta de respuesta del mando a distancia.
+- **Adaptación panorámica del fondo (`HomeBackdrop`):** En Modo Intuitivo el fondo ahora se proyecta al 100% del ancho de pantalla sin el recorte lateral del 15% reservado para la barra de navegación clásica.
+- **Persistencia garantizada de la interfaz:** La selección del Modo Intuitivo permanece fijada entre reinicios de la aplicación hasta que se desactive deliberadamente en Ajustes.
+- **Indicador dinámico de versión:** El pie de pantalla del inicio intuitivo refleja automáticamente la versión real instalada (`v1.1.1`).
+
+---
+
 ## [1.1.0] - 2026-11-22
 
 ### ✨ Modo Intuitivo (Rediseño Estético y Visual Completo)

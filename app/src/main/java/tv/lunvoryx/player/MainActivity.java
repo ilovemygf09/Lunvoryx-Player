@@ -139,6 +139,7 @@ public final class MainActivity extends Activity {
         isIntuitive = settings.getBoolean("intuitive_mode", false);
         FrameLayout scene = new FrameLayout(this);
         backdrop = new HomeBackdrop(this);
+        backdrop.setIntuitive(isIntuitive);
         scene.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
 
         if (isIntuitive) {
@@ -161,7 +162,7 @@ public final class MainActivity extends Activity {
                     handleBack();
                 }
             });
-            root.addView(intuitiveTopBar, new LinearLayout.LayoutParams(-1, -2));
+            root.addView(intuitiveTopBar, new LinearLayout.LayoutParams(-1, dp(this, 58)));
 
             content = column(this);
             root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1.0f));
@@ -1066,6 +1067,8 @@ public final class MainActivity extends Activity {
                 View v = nav.getChildAt(i);
                 if ("Ajustes".equals(v.getTag())) v.setNextFocusRightId(row0.getId());
             }
+        } else {
+            row0.post(row0::requestFocus);
         }
     }
 
