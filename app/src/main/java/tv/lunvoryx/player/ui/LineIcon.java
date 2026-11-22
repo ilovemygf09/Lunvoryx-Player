@@ -19,6 +19,9 @@ public final class LineIcon extends View {
         paint.setColor(color);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(1.65f);paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);
         switch(kind){
             case "home":line(canvas,2,11,12,3,22,11);line(canvas,5,9,5,21,10,21,10,14,14,14,14,21,19,21,19,9);break;
+            case "tv":canvas.drawRoundRect(2,5,22,19,3,3,paint);line(canvas,8,2,12,5,16,2);line(canvas,9,21,15,21);line(canvas,12,19,12,21);break;
+            case "back":case "arrow_left":line(canvas,19,12,5,12);line(canvas,12,5,5,12,12,19);break;
+            case "youtube":canvas.drawRoundRect(2,6,22,18,4,4,paint);paint.setStyle(Paint.Style.FILL);Path ytp=new Path();ytp.moveTo(10,9);ytp.lineTo(16,12);ytp.lineTo(10,15);ytp.close();canvas.drawPath(ytp,paint);paint.setStyle(Paint.Style.STROKE);break;
             case "movie":canvas.drawRoundRect(3,8,21,21,2,2,paint);line(canvas,3,8,2,3,20,1,21,6,3,8);line(canvas,7,3,10,6);line(canvas,14,2,17,5);break;
             case "series":line(canvas,2,7,12,2,22,7,12,12,2,7);line(canvas,3,11,12,16,21,11);line(canvas,3,16,12,21,21,16);break;
             case "search":canvas.drawCircle(10,10,6.5f,paint);line(canvas,14.6f,14.6f,20.5f,20.5f);break;

@@ -43,6 +43,9 @@ import tv.lunvoryx.player.ui.AddPlaylistViewLayout;
 import tv.lunvoryx.player.ui.TvStyle;
 import tv.lunvoryx.player.ui.SquircleGlassDrawable;
 import tv.lunvoryx.player.ui.HomeScreen;
+import tv.lunvoryx.player.ui.IntuitiveHomeScreen;
+import tv.lunvoryx.player.ui.IntuitiveTopBar;
+import tv.lunvoryx.player.ui.MediaDetailView;
 import tv.lunvoryx.player.data.MediaKind;
 import tv.lunvoryx.player.remote.QrCodeGenerator;
 import tv.lunvoryx.player.remote.RemoteServer;
@@ -78,6 +81,9 @@ public final class MainActivity extends Activity {
     private RemoteServer remoteServer;
     private AddPlaylistViewLayout addPlaylistLayout;
     private boolean startupUpdateChecked = false;
+    private boolean isIntuitive = false;
+    private IntuitiveTopBar intuitiveTopBar;
+    private MediaDetailView currentDetailView;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -130,10 +136,41 @@ public final class MainActivity extends Activity {
     }
 
     private void buildShell() {
+        isIntuitive = settings.getBoolean("intuitive_mode", false);
         FrameLayout scene = new FrameLayout(this);
         backdrop = new HomeBackdrop(this);
         scene.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
 
+        if (isIntuitive) {
+            nav = null;
+            LinearLayout root = column(this);
+            scene.addView(root, new FrameLayout.LayoutParams(-1, -1));
+
+            intuitiveTopBar = new IntuitiveTopBar(this, new IntuitiveTopBar.Listener() {
+                @Override public void onSectionSelected(String selectedSection) {
+                    if ("TV en vivo".equalsIgnoreCase(selectedSection)) {
+                        MainActivity.this.navigate("TV En Vivo");
+                    } else {
+                        MainActivity.this.navigate(selectedSection);
+                    }
+                }
+                @Override public void onSearchClicked() {
+                    MainActivity.this.navigate("Buscar");
+                }
+                @Override public void onBackClicked() {
+                    handleBack();
+                }
+            });
+            root.addView(intuitiveTopBar, new LinearLayout.LayoutParams(-1, -2));
+
+            content = column(this);
+            root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            setContentView(scene);
+            render();
+            return;
+        }
+
+        intuitiveTopBar = null;
         LinearLayout root = row(this);
         root.setGravity(Gravity.TOP);
         scene.addView(root, new FrameLayout.LayoutParams(-1, -1));
@@ -263,6 +300,12 @@ public final class MainActivity extends Activity {
     }
 
     private void navigate(String key) {
+        if (currentDetailView != null) {
+            currentDetailView = null;
+            if (intuitiveTopBar != null) {
+                intuitiveTopBar.setShowBackButton(false);
+            }
+        }
         if (key.equals("Guía")) {
             startActivity(new Intent(this, GuideActivity.class));
             return;
@@ -285,20 +328,49 @@ public final class MainActivity extends Activity {
         content.setPadding(dp(this, 20), section.equals("Inicio") ? 0 : dp(this, 26), dp(this, 24), section.equals("Inicio") ? 0 : dp(this, 16));
 
         // Refresh navigation pills visual selection
-        for (int i = 0; i < nav.getChildCount(); i++) {
-            View v = nav.getChildAt(i);
-            if (v instanceof LinearLayout && v.getTag() != null) {
-                LinearLayout b = (LinearLayout) v;
-                boolean isSelected = section.equals(v.getTag());
-                boolean isFocused = v.isFocused();
-                if (b.getChildCount() >= 2 && b.getChildAt(0) instanceof LineIcon && b.getChildAt(1) instanceof TextView) {
-                    updateNavPillState(b, (LineIcon) b.getChildAt(0), (TextView) b.getChildAt(1), isSelected, isFocused);
-                    ((TextView) b.getChildAt(1)).setText(AppStrings.get(this, "nav_" + keyToId((String) v.getTag())));
+        if (nav != null) {
+            for (int i = 0; i < nav.getChildCount(); i++) {
+                View v = nav.getChildAt(i);
+                if (v instanceof LinearLayout && v.getTag() != null) {
+                    LinearLayout b = (LinearLayout) v;
+                    boolean isSelected = section.equals(v.getTag());
+                    boolean isFocused = v.isFocused();
+                    if (b.getChildCount() >= 2 && b.getChildAt(0) instanceof LineIcon && b.getChildAt(1) instanceof TextView) {
+                        updateNavPillState(b, (LineIcon) b.getChildAt(0), (TextView) b.getChildAt(1), isSelected, isFocused);
+                        ((TextView) b.getChildAt(1)).setText(AppStrings.get(this, "nav_" + keyToId((String) v.getTag())));
+                    }
                 }
             }
         }
 
+        if (intuitiveTopBar != null) {
+            intuitiveTopBar.setSection(section.equals("TV En Vivo") ? "TV en vivo" : section);
+            intuitiveTopBar.setShowBackButton(currentDetailView != null);
+        }
+
         if (loaded && section.equals("Inicio")) {
+            if (isIntuitive) {
+                content.setPadding(0, 0, 0, 0);
+                content.addView(new IntuitiveHomeScreen(this, repository, new IntuitiveHomeScreen.Listener() {
+                    @Override public void onNavigate(String target) {
+                        if ("TV en vivo".equalsIgnoreCase(target)) MainActivity.this.navigate("TV En Vivo");
+                        else MainActivity.this.navigate(target);
+                    }
+                    @Override public void onReloadPlaylist() {
+                        work(AppStrings.isEnglish(MainActivity.this) ? "Reloading playlist…" : "Recargando lista…", () -> {
+                            repository.load();
+                        }, () -> {
+                            Toast.makeText(MainActivity.this, AppStrings.isEnglish(MainActivity.this) ? "Playlist reloaded successfully" : "Lista recargada correctamente", Toast.LENGTH_SHORT).show();
+                            render();
+                        });
+                    }
+                    @Override public void onOpenSettings() {
+                        MainActivity.this.navigate("Ajustes");
+                    }
+                }), new LinearLayout.LayoutParams(-1, -1));
+                return;
+            }
+
             content.addView(new HomeScreen(this, repository, new HomeScreen.Actions() {
                 public void navigate(String value) {
                     if ("TV en vivo".equalsIgnoreCase(value)) MainActivity.this.navigate("TV En Vivo");
@@ -319,7 +391,7 @@ public final class MainActivity extends Activity {
                 }
             }), new LinearLayout.LayoutParams(-1, -1));
 
-            if (getCurrentFocus() == null) {
+            if (getCurrentFocus() == null && nav != null) {
                 for (int i = 0; i < nav.getChildCount(); i++) {
                     if ("Inicio".equals(nav.getChildAt(i).getTag())) nav.getChildAt(i).requestFocus();
                 }
@@ -392,7 +464,7 @@ public final class MainActivity extends Activity {
             @Override public void onToggleFavorite(Channel channel) {
                 repository.toggleFavorite(channel.id);
             }
-        });
+        }, isIntuitive);
         content.addView(browseView, new LinearLayout.LayoutParams(-1, -1));
     }
 
@@ -401,16 +473,60 @@ public final class MainActivity extends Activity {
         content.setPadding(0, 0, 0, 0);
         MediaBrowseView browseView = new MediaBrowseView(this, repository, isMovies, new MediaBrowseView.Listener() {
             @Override public void onPlay(Channel channel, List<Channel> list, int index) {
-                lastFocusedId = channel.id;
-                work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
-                        () -> repository.recordPlayed(channel.id),
-                        () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(list), Math.max(0, index)));
+                if (isIntuitive) {
+                    showMediaDetails(channel, isMovies, list, index);
+                } else {
+                    lastFocusedId = channel.id;
+                    work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
+                            () -> repository.recordPlayed(channel.id),
+                            () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(list), Math.max(0, index)));
+                }
+            }
+            @Override public void onOpenDetails(Channel channel, List<Channel> list, int index) {
+                if (isIntuitive) {
+                    showMediaDetails(channel, isMovies, list, index);
+                } else {
+                    onPlay(channel, list, index);
+                }
             }
             @Override public void onToggleFavorite(Channel channel) {
                 repository.toggleFavorite(channel.id);
             }
-        });
+        }, isIntuitive);
         content.addView(browseView, new LinearLayout.LayoutParams(-1, -1));
+    }
+
+    private void showMediaDetails(Channel channel, boolean isMovies, List<Channel> list, int index) {
+        content.removeAllViews();
+        content.setPadding(0, 0, 0, 0);
+        if (intuitiveTopBar != null) {
+            intuitiveTopBar.setShowBackButton(true);
+        }
+        currentDetailView = new MediaDetailView(this, channel, isMovies, repository, new MediaDetailView.Listener() {
+            @Override public void onPlay(Channel c) {
+                lastFocusedId = c.id;
+                work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
+                        () -> repository.recordPlayed(c.id),
+                        () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(list), Math.max(0, index)));
+            }
+            @Override public void onToggleFavorite(Channel c) {
+                repository.toggleFavorite(c.id);
+            }
+            @Override public void onBack() {
+                closeDetailView();
+            }
+        });
+        content.addView(currentDetailView, new LinearLayout.LayoutParams(-1, -1));
+    }
+
+    private void closeDetailView() {
+        if (currentDetailView != null) {
+            currentDetailView = null;
+            if (intuitiveTopBar != null) {
+                intuitiveTopBar.setShowBackButton(false);
+            }
+            render();
+        }
     }
 
     private void renderSearchSection() {
@@ -431,10 +547,12 @@ public final class MainActivity extends Activity {
             }
         });
 
-        for (int i = 0; i < nav.getChildCount(); i++) {
-            View v = nav.getChildAt(i);
-            if ("Buscar".equals(v.getTag()) && searchView.getSearchField() != null) {
-                v.setNextFocusRightId(searchView.getSearchField().getId());
+        if (nav != null) {
+            for (int i = 0; i < nav.getChildCount(); i++) {
+                View v = nav.getChildAt(i);
+                if ("Buscar".equals(v.getTag()) && searchView.getSearchField() != null) {
+                    v.setNextFocusRightId(searchView.getSearchField().getId());
+                }
             }
         }
 
@@ -792,10 +910,12 @@ public final class MainActivity extends Activity {
             }
         });
 
-        for (int i = 0; i < nav.getChildCount(); i++) {
-            View v = nav.getChildAt(i);
-            if ("Mis listas".equals(v.getTag()) && addPlaylistLayout.getFirstFocusable() != null) {
-                v.setNextFocusRightId(addPlaylistLayout.getFirstFocusable().getId());
+        if (nav != null) {
+            for (int i = 0; i < nav.getChildCount(); i++) {
+                View v = nav.getChildAt(i);
+                if ("Mis listas".equals(v.getTag()) && addPlaylistLayout.getFirstFocusable() != null) {
+                    v.setNextFocusRightId(addPlaylistLayout.getFirstFocusable().getId());
+                }
             }
         }
 
@@ -875,6 +995,9 @@ public final class MainActivity extends Activity {
         gcp.bottomMargin = dp(this, 22);
         settingsList.addView(genCard, gcp);
 
+        // Row 0: Modo Intuitivo (Switch)
+        View row0 = addSettingSwitchRow(genCard, "brand", AppStrings.get(this, "setting_intuitive_mode"), AppStrings.get(this, "setting_intuitive_sub"), "intuitive_mode", false, true);
+
         // Row 1: Logotipos de canales (Switch)
         View row1 = addSettingSwitchRow(genCard, "tv", AppStrings.get(this, "setting_logos"), null, "logos", true, true);
 
@@ -938,9 +1061,11 @@ public final class MainActivity extends Activity {
         addSettingActionRow(moreCard, "brand", AppStrings.isEnglish(this) ? "GitHub Repository" : "Repositorio de GitHub", AppStrings.isEnglish(this) ? "Releases & updates source" : "Origen de actualizaciones y releases", ghRepo, this::configureGitHubRepo, false);
 
         // Set D-pad focus from sidebar to first setting row
-        for (int i = 0; i < nav.getChildCount(); i++) {
-            View v = nav.getChildAt(i);
-            if ("Ajustes".equals(v.getTag())) v.setNextFocusRightId(row1.getId());
+        if (nav != null) {
+            for (int i = 0; i < nav.getChildCount(); i++) {
+                View v = nav.getChildAt(i);
+                if ("Ajustes".equals(v.getTag())) v.setNextFocusRightId(row0.getId());
+            }
         }
     }
 
@@ -977,6 +1102,10 @@ public final class MainActivity extends Activity {
             boolean next = !ms.isChecked();
             ms.setChecked(next, true);
             settings.edit().putBoolean(prefKey, next).apply();
+            if ("intuitive_mode".equals(prefKey)) {
+                buildShell();
+                return;
+            }
             if ("logos".equals(prefKey) || "alphabetical".equals(prefKey)) {
                 // Background update without resetting full view scroll
             }
@@ -1416,6 +1545,10 @@ public final class MainActivity extends Activity {
     }
 
     private void handleBack() {
+        if (currentDetailView != null) {
+            closeDetailView();
+            return;
+        }
         if (!query.isEmpty() || !group.equals("Todos")) {
             query = "";
             group = "Todos";

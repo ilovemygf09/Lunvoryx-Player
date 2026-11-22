@@ -36,6 +36,9 @@ public final class MediaBrowseView extends LinearLayout {
     public interface Listener {
         void onPlay(Channel channel, List<Channel> list, int index);
         void onToggleFavorite(Channel channel);
+        default void onOpenDetails(Channel channel, List<Channel> list, int index) {
+            onPlay(channel, list, index);
+        }
     }
 
     private static class CategoryItem {
@@ -55,6 +58,7 @@ public final class MediaBrowseView extends LinearLayout {
     private final PlaylistRepository repository;
     private final boolean isMovies;
     private final Listener listener;
+    private final boolean isIntuitive;
 
     private final List<Channel> fullItems = new ArrayList<>();
     private final List<CategoryItem> categories = new ArrayList<>();
@@ -88,11 +92,16 @@ public final class MediaBrowseView extends LinearLayout {
     private final Map<String, TmdbClient.Details> tmdbCache = new HashMap<>();
 
     public MediaBrowseView(Context context, PlaylistRepository repository, boolean isMovies, Listener listener) {
+        this(context, repository, isMovies, listener, false);
+    }
+
+    public MediaBrowseView(Context context, PlaylistRepository repository, boolean isMovies, Listener listener, boolean isIntuitive) {
         super(context);
         this.context = context;
         this.repository = repository;
         this.isMovies = isMovies;
         this.listener = listener;
+        this.isIntuitive = isIntuitive;
 
         setOrientation(VERTICAL);
         buildUi();
@@ -100,42 +109,46 @@ public final class MediaBrowseView extends LinearLayout {
     }
 
     private void buildUi() {
-        setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
+        if (!isIntuitive) {
+            setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
 
-        // 1. Header: Icon + Title + Subtitle
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0, 0, 0, dp(context, 10));
+            // 1. Header: Icon + Title + Subtitle
+            LinearLayout header = new LinearLayout(context);
+            header.setOrientation(HORIZONTAL);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            header.setPadding(0, 0, 0, dp(context, 10));
 
-        LineIcon sectionIcon = new LineIcon(context, isMovies ? "movie" : "series");
-        sectionIcon.setColor(0xFFF8F8FB);
-        header.addView(sectionIcon, new LinearLayout.LayoutParams(dp(context, 32), dp(context, 32)));
+            LineIcon sectionIcon = new LineIcon(context, isMovies ? "movie" : "series");
+            sectionIcon.setColor(0xFFF8F8FB);
+            header.addView(sectionIcon, new LinearLayout.LayoutParams(dp(context, 32), dp(context, 32)));
 
-        LinearLayout titleCol = new LinearLayout(context);
-        titleCol.setOrientation(VERTICAL);
-        titleCol.setPadding(dp(context, 14), 0, 0, 0);
+            LinearLayout titleCol = new LinearLayout(context);
+            titleCol.setOrientation(VERTICAL);
+            titleCol.setPadding(dp(context, 14), 0, 0, 0);
 
-        TextView title = new TextView(context);
-        title.setText(isMovies ? (AppStrings.isEnglish(context) ? "Movies" : "Películas") : (AppStrings.isEnglish(context) ? "Series" : "Series"));
-        title.setTextSize(26);
-        title.setTextColor(0xFFFFFFFF);
-        title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        titleCol.addView(title);
+            TextView title = new TextView(context);
+            title.setText(isMovies ? (AppStrings.isEnglish(context) ? "Movies" : "Películas") : (AppStrings.isEnglish(context) ? "Series" : "Series"));
+            title.setTextSize(26);
+            title.setTextColor(0xFFFFFFFF);
+            title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            titleCol.addView(title);
 
-        TextView sub = new TextView(context);
-        sub.setText(isMovies ?
-                (AppStrings.isEnglish(context) ? "Thousands of movies in high quality, organized by categories" : "Miles de películas en alta calidad, organizadas por categorías") :
-                (AppStrings.isEnglish(context) ? "Thousands of series in high quality, organized by categories" : "Miles de series en alta calidad, organizadas por categorías"));
-        sub.setTextSize(12);
-        sub.setTextColor(0xFF8F91A2);
-        sub.setPadding(0, dp(context, 2), 0, 0);
-        titleCol.addView(sub);
+            TextView sub = new TextView(context);
+            sub.setText(isMovies ?
+                    (AppStrings.isEnglish(context) ? "Thousands of movies in high quality, organized by categories" : "Miles de películas en alta calidad, organizadas por categorías") :
+                    (AppStrings.isEnglish(context) ? "Thousands of series in high quality, organized by categories" : "Miles de series en alta calidad, organizadas por categorías"));
+            sub.setTextSize(12);
+            sub.setTextColor(0xFF8F91A2);
+            sub.setPadding(0, dp(context, 2), 0, 0);
+            titleCol.addView(sub);
 
-        header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
-        addView(header);
+            header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
+            addView(header);
+        } else {
+            setPadding(dp(context, 16), dp(context, 4), dp(context, 16), dp(context, 12));
+        }
 
-        // 2. Three columns body
+        // 2. Body
         LinearLayout body = new LinearLayout(context);
         body.setOrientation(HORIZONTAL);
         addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -146,8 +159,10 @@ public final class MediaBrowseView extends LinearLayout {
         // COLUMN B: Grid de contenido
         buildGridColumn(body);
 
-        // COLUMN C: Panel Vista Previa
-        buildPreviewColumn(body);
+        // COLUMN C: Panel Vista Previa (only in classic mode)
+        if (!isIntuitive) {
+            buildPreviewColumn(body);
+        }
     }
 
     private void buildCategoriesColumn(LinearLayout body) {
@@ -273,9 +288,9 @@ public final class MediaBrowseView extends LinearLayout {
         tools.addView(sortBtn, sp);
         colB.addView(tools);
 
-        // Content Grid (5 columns of vertical movie posters)
+        // Content Grid (5-6 columns of vertical movie posters)
         posterGrid = new RecyclerView(context);
-        posterGrid.setLayoutManager(new GridLayoutManager(context, 4));
+        posterGrid.setLayoutManager(new GridLayoutManager(context, isIntuitive ? 6 : 4));
         posterGrid.setItemAnimator(null);
         posterGrid.setClipToPadding(false);
         posterAdapter = new PosterAdapter();
@@ -283,7 +298,7 @@ public final class MediaBrowseView extends LinearLayout {
         colB.addView(posterGrid, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1);
-        lp.rightMargin = dp(context, 10);
+        lp.rightMargin = isIntuitive ? 0 : dp(context, 10);
         body.addView(colB, lp);
     }
 
@@ -548,6 +563,22 @@ public final class MediaBrowseView extends LinearLayout {
     }
 
     private void applyCategoryRowStyle(LinearLayout row, LineIcon icon, TextView label, TextView count, boolean selected, boolean focused) {
+        if (isIntuitive) {
+            if (selected || focused) {
+                row.setBackground(TvStyle.squircleSolid(context, 12, selected ? 0xFF007AFF : 0xFF1E2D4A));
+                icon.setColor(0xFFFFFFFF);
+                label.setTextColor(0xFFFFFFFF);
+                label.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+                count.setTextColor(0xFFFFFFFF);
+            } else {
+                row.setBackground(null);
+                icon.setColor(0xFF8F91A2);
+                label.setTextColor(0xFFCACBD4);
+                label.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+                count.setTextColor(0xFFB5B6C2);
+            }
+            return;
+        }
         if (selected || focused) {
             row.setBackground(TvStyle.squircleSolid(context, 12, selected ? (focused ? 0xFFFFFFFF : 0xFFE0E0E6) : 0xFFFFFFFF));
             icon.setColor(0xFF14151B);
@@ -710,7 +741,8 @@ public final class MediaBrowseView extends LinearLayout {
             card.setFocusable(true);
             card.setClickable(true);
             int margin = dp(context, 4);
-            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(-1, dp(context, 142));
+            int h = isIntuitive ? dp(context, 168) : dp(context, 142);
+            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(-1, h);
             lp.setMargins(margin, margin, margin, margin);
             card.setLayoutParams(lp);
 
@@ -758,13 +790,16 @@ public final class MediaBrowseView extends LinearLayout {
 
             card.setOnClickListener(v -> {
                 if (item != null && listener != null) {
-                    listener.onPlay(item, filteredItems, filteredItems.indexOf(item));
+                    listener.onOpenDetails(item, filteredItems, filteredItems.indexOf(item));
                 }
             });
 
             card.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus && item != null) {
                     selectForPreview(item);
+                }
+                if (isIntuitive) {
+                    cardBg.setCustomStroke(hasFocus ? 0xFF00BFFF : 0x22FFFFFF, hasFocus ? 2.0f : 1.0f);
                 }
                 cardBg.setFocused(hasFocus);
                 if (hasFocus) {

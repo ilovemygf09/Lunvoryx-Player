@@ -56,6 +56,7 @@ public final class LiveTvBrowseView extends LinearLayout {
     private final PlaylistRepository repository;
     private final EpgRepository epgRepository;
     private final Listener listener;
+    private final boolean isIntuitive;
 
     private final List<Channel> fullChannels = new ArrayList<>();
     private final List<CategoryItem> categories = new ArrayList<>();
@@ -89,11 +90,16 @@ public final class LiveTvBrowseView extends LinearLayout {
     private Channel currentSelectedChannel;
 
     public LiveTvBrowseView(Context context, PlaylistRepository repository, Listener listener) {
+        this(context, repository, listener, false);
+    }
+
+    public LiveTvBrowseView(Context context, PlaylistRepository repository, Listener listener, boolean isIntuitive) {
         super(context);
         this.context = context;
         this.repository = repository;
         this.epgRepository = new EpgRepository(context);
         this.listener = listener;
+        this.isIntuitive = isIntuitive;
 
         setOrientation(VERTICAL);
         buildUi();
@@ -101,40 +107,44 @@ public final class LiveTvBrowseView extends LinearLayout {
     }
 
     private void buildUi() {
-        setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
+        if (!isIntuitive) {
+            setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
 
-        // 1. Header: Icon + Title + Subtitle
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0, 0, 0, dp(context, 10));
+            // 1. Header: Icon + Title + Subtitle
+            LinearLayout header = new LinearLayout(context);
+            header.setOrientation(HORIZONTAL);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            header.setPadding(0, 0, 0, dp(context, 10));
 
-        LineIcon tvIcon = new LineIcon(context, "tv");
-        tvIcon.setColor(0xFFF8F8FB);
-        header.addView(tvIcon, new LinearLayout.LayoutParams(dp(context, 32), dp(context, 32)));
+            LineIcon tvIcon = new LineIcon(context, "tv");
+            tvIcon.setColor(0xFFF8F8FB);
+            header.addView(tvIcon, new LinearLayout.LayoutParams(dp(context, 32), dp(context, 32)));
 
-        LinearLayout titleCol = new LinearLayout(context);
-        titleCol.setOrientation(VERTICAL);
-        titleCol.setPadding(dp(context, 14), 0, 0, 0);
+            LinearLayout titleCol = new LinearLayout(context);
+            titleCol.setOrientation(VERTICAL);
+            titleCol.setPadding(dp(context, 14), 0, 0, 0);
 
-        TextView title = new TextView(context);
-        title.setText(AppStrings.get(context, "nav_live"));
-        title.setTextSize(26);
-        title.setTextColor(0xFFFFFFFF);
-        title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        titleCol.addView(title);
+            TextView title = new TextView(context);
+            title.setText(AppStrings.get(context, "nav_live"));
+            title.setTextSize(26);
+            title.setTextColor(0xFFFFFFFF);
+            title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            titleCol.addView(title);
 
-        TextView sub = new TextView(context);
-        sub.setText(AppStrings.isEnglish(context) ?
-                "Thousands of live channels, organized by categories" :
-                "Miles de canales en directo, organizados por categorías");
-        sub.setTextSize(12);
-        sub.setTextColor(0xFF8F91A2);
-        sub.setPadding(0, dp(context, 2), 0, 0);
-        titleCol.addView(sub);
+            TextView sub = new TextView(context);
+            sub.setText(AppStrings.isEnglish(context) ?
+                    "Thousands of live channels, organized by categories" :
+                    "Miles de canales en directo, organizados por categorías");
+            sub.setTextSize(12);
+            sub.setTextColor(0xFF8F91A2);
+            sub.setPadding(0, dp(context, 2), 0, 0);
+            titleCol.addView(sub);
 
-        header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
-        addView(header);
+            header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
+            addView(header);
+        } else {
+            setPadding(dp(context, 16), dp(context, 4), dp(context, 16), dp(context, 12));
+        }
 
         // 2. Three Columns Body
         LinearLayout body = new LinearLayout(context);
@@ -424,13 +434,19 @@ public final class LiveTvBrowseView extends LinearLayout {
         btnPlay = new TextView(context);
         btnPlay.setText("▶  " + (AppStrings.isEnglish(context) ? "Watch channel" : "Ver canal"));
         btnPlay.setTextSize(12);
-        btnPlay.setTextColor(0xFF14151B);
+        btnPlay.setTextColor(isIntuitive ? 0xFFFFFFFF : 0xFF14151B);
         btnPlay.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         btnPlay.setGravity(Gravity.CENTER);
         btnPlay.setPadding(dp(context, 14), dp(context, 9), dp(context, 14), dp(context, 9));
-        btnPlay.setBackground(TvStyle.squircleSolid(context, 12, 0xFFFFFFFF));
+        btnPlay.setBackground(TvStyle.squircleSolid(context, 12, isIntuitive ? 0xFF007AFF : 0xFFFFFFFF));
         btnPlay.setFocusable(true);
         btnPlay.setClickable(true);
+        if (isIntuitive) {
+            btnPlay.setOnFocusChangeListener((v, f) -> {
+                btnPlay.setBackground(TvStyle.squircleSolid(context, 12, f ? 0xFF0A84FF : 0xFF007AFF));
+                v.animate().scaleX(f ? 1.04f : 1.0f).scaleY(f ? 1.04f : 1.0f).setDuration(120).start();
+            });
+        }
         btnPlay.setOnClickListener(v -> {
             if (currentSelectedChannel != null && listener != null) {
                 listener.onPlay(currentSelectedChannel, filteredChannels, filteredChannels.indexOf(currentSelectedChannel));
@@ -560,7 +576,8 @@ public final class LiveTvBrowseView extends LinearLayout {
         }
     }
 
-    private static String chooseIconForGroup(String g) {
+    private String chooseIconForGroup(String g) {
+        if (isIntuitive) return "tv";
         String lower = g.toLowerCase(Locale.ROOT);
         if (lower.contains("depor") || lower.contains("sport") || lower.contains("futbol")) return "trophy";
         if (lower.contains("noticia") || lower.contains("news") || lower.contains("info")) return "news";
@@ -623,6 +640,22 @@ public final class LiveTvBrowseView extends LinearLayout {
     }
 
     private void applyCategoryRowStyle(LinearLayout row, LineIcon icon, TextView label, TextView count, boolean selected, boolean focused) {
+        if (isIntuitive) {
+            if (selected || focused) {
+                row.setBackground(TvStyle.squircleSolid(context, 12, selected ? 0xFF007AFF : 0xFF1E2D4A));
+                icon.setColor(0xFFFFFFFF);
+                label.setTextColor(0xFFFFFFFF);
+                label.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+                count.setTextColor(0xFFFFFFFF);
+            } else {
+                row.setBackground(null);
+                icon.setColor(0xFF7E8B9E);
+                label.setTextColor(0xFFCACBD4);
+                label.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+                count.setTextColor(0xFF8F91A2);
+            }
+            return;
+        }
         if (selected || focused) {
             row.setBackground(TvStyle.squircleSolid(context, 12, selected ? (focused ? 0xFFFFFFFF : 0xFFE0E0E6) : 0xFFFFFFFF));
             icon.setColor(0xFF14151B);

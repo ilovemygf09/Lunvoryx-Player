@@ -35,6 +35,8 @@ public final class AppStrings {
             case "subtitle_settings": return en ? "Personalize your experience" : "Personaliza tu experiencia";
             case "subtitle_playlists": return en ? "Your sources, saved on this device." : "Tus fuentes, guardadas en este dispositivo.";
             case "section_general": return en ? "General" : "General";
+            case "setting_intuitive_mode": return en ? "Intuitive Mode" : "Modo Intuitivo";
+            case "setting_intuitive_sub": return en ? "Top navigation layout, interactive cards and media details" : "Navegación superior, mosaico interactivo y fichas de contenidos";
             case "section_playback": return en ? "Playback" : "Reproducción";
             case "setting_logos": return en ? "Channel logos" : "Logotipos de canales";
             case "setting_alpha": return en ? "Alphabetical order" : "Orden alfabético";
@@ -67,6 +69,22 @@ public final class AppStrings {
             case "guide": return en ? "Guide" : "Guía";
             case "add_list": return en ? "+ Add list" : "+ Añadir lista";
             case "demo_list": return en ? "Demo list" : "Lista de prueba";
+            case "play_action": return en ? "Reproducir" : "Play";
+            case "watch_channel": return en ? "Ver canal" : "Watch channel";
+            case "favorite_action": return en ? "Favorito" : "Favorite";
+            case "trailer_action": return en ? "Ver tráiler" : "Watch trailer";
+            case "my_list_action": return en ? "Mi lista" : "My list";
+            case "official_trailer": return en ? "Tráiler oficial · " : "Official Trailer · ";
+            case "cast": return en ? "Reparto" : "Cast";
+            case "rating": return en ? "Valoración" : "Rating";
+            case "details": return en ? "Detalles" : "Details";
+            case "seasons_and_episodes": return en ? "Temporadas y episodios" : "Seasons & episodes";
+            case "reload_playlist": return en ? "Recargar lista" : "Reload playlist";
+            case "expires_on": return en ? "Tu lista caduca: " : "Your list expires: ";
+            case "preview": return en ? "Vista previa" : "Vista previa";
+            case "next_up": return en ? "A continuación" : "Up Next";
+            case "categories": return en ? "Categorías" : "Categorías";
+            case "channels": return en ? "Canales" : "Canales";
             case "empty_search": return en ? "No channels match your search query." : "No se han encontrado canales con ese término.";
             case "search_prompt": return en ? "Type above to search across your library." : "Usa el botón de búsqueda arriba para buscar en tu biblioteca.";
 
