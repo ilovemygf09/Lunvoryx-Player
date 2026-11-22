@@ -47,6 +47,7 @@ import tv.lunvoryx.player.ui.IntuitiveHomeScreen;
 import tv.lunvoryx.player.ui.IntuitiveTopBar;
 import tv.lunvoryx.player.ui.MediaDetailView;
 import tv.lunvoryx.player.data.MediaKind;
+import tv.lunvoryx.player.data.SeriesItem;
 import tv.lunvoryx.player.remote.QrCodeGenerator;
 import tv.lunvoryx.player.remote.RemoteServer;
 import tv.lunvoryx.player.tmdb.TmdbClient;
@@ -326,7 +327,11 @@ public final class MainActivity extends Activity {
         content.removeAllViews();
         grid = null;
         backdrop.setHome(section.equals("Inicio"));
-        content.setPadding(dp(this, 20), section.equals("Inicio") ? 0 : dp(this, 26), dp(this, 24), section.equals("Inicio") ? 0 : dp(this, 16));
+        if (isIntuitive) {
+            content.setPadding(0, 0, 0, 0);
+        } else {
+            content.setPadding(dp(this, 20), section.equals("Inicio") ? 0 : dp(this, 26), dp(this, 24), section.equals("Inicio") ? 0 : dp(this, 16));
+        }
 
         // Refresh navigation pills visual selection
         if (nav != null) {
@@ -349,7 +354,7 @@ public final class MainActivity extends Activity {
             intuitiveTopBar.setShowBackButton(currentDetailView != null);
         }
 
-        if (loaded && section.equals("Inicio")) {
+        if (section.equals("Inicio")) {
             if (isIntuitive) {
                 content.setPadding(0, 0, 0, 0);
                 content.addView(new IntuitiveHomeScreen(this, repository, new IntuitiveHomeScreen.Listener() {
@@ -359,7 +364,12 @@ public final class MainActivity extends Activity {
                     }
                     @Override public void onReloadPlaylist() {
                         work(AppStrings.isEnglish(MainActivity.this) ? "Reloading playlist…" : "Recargando lista…", () -> {
-                            repository.load();
+                            List<Playlist> pList = repository.getPlaylists();
+                            if (!pList.isEmpty()) {
+                                repository.refresh(pList.get(0).id);
+                            } else {
+                                repository.addDemoPlaylist();
+                            }
                         }, () -> {
                             Toast.makeText(MainActivity.this, AppStrings.isEnglish(MainActivity.this) ? "Playlist reloaded successfully" : "Lista recargada correctamente", Toast.LENGTH_SHORT).show();
                             render();
@@ -371,6 +381,8 @@ public final class MainActivity extends Activity {
                 }), new LinearLayout.LayoutParams(-1, -1));
                 return;
             }
+
+            if (loaded) {
 
             content.addView(new HomeScreen(this, repository, new HomeScreen.Actions() {
                 public void navigate(String value) {
@@ -397,28 +409,34 @@ public final class MainActivity extends Activity {
                     if ("Inicio".equals(nav.getChildAt(i).getTag())) nav.getChildAt(i).requestFocus();
                 }
             }
+                return;
+            }
             return;
         }
 
-        LinearLayout header = row(this);
-        String headerTitle = AppStrings.get(this, "nav_" + keyToId(section));
-        TextView title = text(this, headerTitle, 29, TEXT);
-        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        if (!isIntuitive) {
+            LinearLayout header = row(this);
+            String headerTitle = AppStrings.get(this, "nav_" + keyToId(section));
+            TextView title = text(this, headerTitle, 29, TEXT);
+            title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextClock clock = new TextClock(this);
-        clock.setFormat24Hour("HH:mm");
-        clock.setFormat12Hour("h:mm a");
-        clock.setTextSize(16);
-        clock.setTextColor(MUTED);
-        header.addView(clock);
-        content.addView(header);
+            TextClock clock = new TextClock(this);
+            clock.setFormat24Hour("HH:mm");
+            clock.setFormat12Hour("h:mm a");
+            clock.setTextSize(16);
+            clock.setTextColor(MUTED);
+            header.addView(clock);
+            content.addView(header);
 
-        subtitle = text(this, "", 13, MUTED);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
-        sp.topMargin = dp(this, 7);
-        sp.bottomMargin = dp(this, 20);
-        content.addView(subtitle, sp);
+            subtitle = text(this, "", 13, MUTED);
+            LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
+            sp.topMargin = dp(this, 7);
+            sp.bottomMargin = dp(this, 20);
+            content.addView(subtitle, sp);
+        } else {
+            subtitle = new TextView(this);
+        }
 
         if (!loaded) {
             subtitle.setText(AppStrings.isEnglish(this) ? "Preparing your library…" : "Preparando tu biblioteca…");
@@ -467,6 +485,7 @@ public final class MainActivity extends Activity {
             }
         }, isIntuitive);
         content.addView(browseView, new LinearLayout.LayoutParams(-1, -1));
+        if (isIntuitive) browseView.requestFocusFirstItem();
     }
 
     private void renderMediaBrowseSection(boolean isMovies) {
@@ -490,11 +509,38 @@ public final class MainActivity extends Activity {
                     onPlay(channel, list, index);
                 }
             }
+            @Override public void onOpenSeriesDetails(SeriesItem series) {
+                showSeriesDetails(series);
+            }
             @Override public void onToggleFavorite(Channel channel) {
                 repository.toggleFavorite(channel.id);
             }
         }, isIntuitive);
         content.addView(browseView, new LinearLayout.LayoutParams(-1, -1));
+        if (isIntuitive) browseView.requestFocusFirstItem();
+    }
+
+    private void showSeriesDetails(SeriesItem series) {
+        content.removeAllViews();
+        content.setPadding(0, 0, 0, 0);
+        if (intuitiveTopBar != null) {
+            intuitiveTopBar.setShowBackButton(true);
+        }
+        currentDetailView = new MediaDetailView(this, series, repository, new MediaDetailView.Listener() {
+            @Override public void onPlay(Channel c) {
+                lastFocusedId = c.id;
+                work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
+                        () -> repository.recordPlayed(c.id),
+                        () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(series.allEpisodeChannels), Math.max(0, series.allEpisodeChannels.indexOf(c))));
+            }
+            @Override public void onToggleFavorite(Channel c) {
+                repository.toggleFavorite(c.id);
+            }
+            @Override public void onBack() {
+                closeDetailView();
+            }
+        });
+        content.addView(currentDetailView, new LinearLayout.LayoutParams(-1, -1));
     }
 
     private void showMediaDetails(Channel channel, boolean isMovies, List<Channel> list, int index) {

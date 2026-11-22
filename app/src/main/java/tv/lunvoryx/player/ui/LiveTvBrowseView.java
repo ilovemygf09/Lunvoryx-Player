@@ -201,7 +201,7 @@ public final class LiveTvBrowseView extends LinearLayout {
         dp.topMargin = dp(context, 4);
         colA.addView(down, dp);
 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, 190), -1);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, isIntuitive ? 220 : 190), -1);
         lp.rightMargin = dp(context, 10);
         body.addView(colA, lp);
     }
@@ -524,8 +524,18 @@ public final class LiveTvBrowseView extends LinearLayout {
 
         colC.addView(nextCard);
 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, 252), -1);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, isIntuitive ? 320 : 252), -1);
         body.addView(colC, lp);
+    }
+
+    public void requestFocusFirstItem() {
+        post(() -> {
+            if (channelList != null) {
+                View first = channelList.getChildAt(0);
+                if (first != null) first.requestFocus();
+                else channelList.requestFocus();
+            }
+        });
     }
 
     private void loadData() {
@@ -876,10 +886,17 @@ public final class LiveTvBrowseView extends LinearLayout {
                     selectForPreview(item);
                 }
                 if (hasFocus) {
-                    row.setBackground(TvStyle.squircleSolid(context, 12, 0xFFE2E2E6));
-                    nameView.setTextColor(0xFF14151B);
-                    programView.setTextColor(0xFF434554);
-                    timeView.setTextColor(0xFF14151B);
+                    if (isIntuitive) {
+                        row.setBackground(TvStyle.squircleSolid(context, 12, 0x33007AFF).setCustomStroke(0xFF007AFF, 2.0f));
+                        nameView.setTextColor(0xFFFFFFFF);
+                        programView.setTextColor(0xFFCBD5E1);
+                        timeView.setTextColor(0xFFFFFFFF);
+                    } else {
+                        row.setBackground(TvStyle.squircleSolid(context, 12, 0xFFE2E2E6));
+                        nameView.setTextColor(0xFF14151B);
+                        programView.setTextColor(0xFF434554);
+                        timeView.setTextColor(0xFF14151B);
+                    }
                 } else {
                     row.setBackground(null);
                     nameView.setTextColor(0xFFFFFFFF);

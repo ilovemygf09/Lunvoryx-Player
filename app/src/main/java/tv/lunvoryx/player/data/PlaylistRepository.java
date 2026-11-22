@@ -76,6 +76,11 @@ public final class PlaylistRepository {
         }
         playlists = Collections.unmodifiableList(restored);
         loaded = true;
+        if (restored.isEmpty() || (restored.size() == 1 && DEMO_ID.equals(restored.get(0).id) && restored.get(0).channels.size() <= 3)) {
+            try {
+                addDemoPlaylist();
+            } catch (Exception ignored) {}
+        }
         return getPlaylists();
     }
 
@@ -145,13 +150,85 @@ public final class PlaylistRepository {
     public synchronized Playlist addDemoPlaylist() throws IOException {
         ensureLoaded();
         List<Channel> channels = new ArrayList<>();
-        // Public Blender films; artwork URLs are listed by the official Shaka Player demo catalogue.
-        channels.add(Channel.create("Big Buck Bunny", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-                "Películas de prueba", "https://storage.googleapis.com/shaka-asset-icons/big_buck_bunny.png", "", "", ""));
-        channels.add(Channel.create("Sintel", "https://storage.googleapis.com/shaka-demo-assets/sintel/dash.mpd",
-                "Películas de prueba", "https://storage.googleapis.com/shaka-asset-icons/sintel.png", "", "", ""));
-        channels.add(Channel.create("Tears of Steel", "https://test-streams.mux.dev/tos_ismc/main.m3u8",
-                "Películas de prueba", "https://storage.googleapis.com/shaka-asset-icons/tears_of_steel.png", "", "", ""));
+
+        // 1. Live TV Channels (matching user reference mockup)
+        channels.add(Channel.create("DAZN LaLiga", "https://test-streams.mux.dev/live/dazn_laliga.m3u8", "EU-ES DAZN", "", "dazn.es", "", ""));
+        channels.add(Channel.create("La 1 HD", "https://test-streams.mux.dev/live/la1.m3u8", "ES | GENERALISTAS", "", "la1.es", "", ""));
+        channels.add(Channel.create("Antena 3", "https://test-streams.mux.dev/live/antena3.m3u8", "ES | GENERALISTAS", "", "antena3.es", "", ""));
+        channels.add(Channel.create("Movistar Cine", "https://test-streams.mux.dev/live/movistar_cine.ts", "ES | CINE", "", "mcine.es", "", ""));
+        channels.add(Channel.create("Eurosport", "https://test-streams.mux.dev/live/eurosport.ts", "ES | DEPORTES", "", "eurosport.es", "", ""));
+        channels.add(Channel.create("National Geographic", "https://test-streams.mux.dev/live/natgeo.ts", "ES | DOCUMENTALES", "", "natgeo.es", "", ""));
+        channels.add(Channel.create("laSexta", "https://test-streams.mux.dev/live/lasexta.m3u8", "ES | GENERALISTAS", "", "lasexta.es", "", ""));
+        channels.add(Channel.create("Cuatro", "https://test-streams.mux.dev/live/cuatro.m3u8", "ES | GENERALISTAS", "", "cuatro.es", "", ""));
+
+        // 2. Movies (matching user reference mockup)
+        channels.add(Channel.create("La mangosta", "https://test-streams.mux.dev/movie/mangosta.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("El vestido", "https://test-streams.mux.dev/movie/vestido.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("Colisión", "https://test-streams.mux.dev/movie/colision.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("Kraken", "https://test-streams.mux.dev/movie/kraken.mkv", "ES | PELÍCULAS 2026 (MKV)", "", "", "", ""));
+        channels.add(Channel.create("Recreación de un asesinato", "https://test-streams.mux.dev/movie/recreacion.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("Insidious: Fuera del límite", "https://test-streams.mux.dev/movie/insidious.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("La última chispa de esperanza", "https://test-streams.mux.dev/movie/chispa.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("¿Por qué me casé otra vez?", "https://test-streams.mux.dev/movie/porque.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("En la ruta del crimen", "https://test-streams.mux.dev/movie/crimen.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("Sintel", "https://test-streams.mux.dev/movie/sintel.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("Luces en la catedral", "https://test-streams.mux.dev/movie/luces.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
+        channels.add(Channel.create("Cómo entrenar a tu dragón 2", "https://test-streams.mux.dev/movie/dragon.mp4", "ES | PELÍCULAS ANIMACIÓN", "", "", "", ""));
+
+        // 3. Series (multiple episodes per series to demonstrate 1-cover-per-series grouping and episode sheets)
+        // Dark (3 seasons, 6 episodes)
+        channels.add(Channel.create("Dark S01 E01 - Secretos", "https://test-streams.mux.dev/series/dark_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Dark S01 E02 - Mentiras", "https://test-streams.mux.dev/series/dark_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Dark S01 E03 - Pasados y presentes", "https://test-streams.mux.dev/series/dark_s1e3.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Dark S02 E01 - Principios y finales", "https://test-streams.mux.dev/series/dark_s2e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Dark S02 E02 - Materia oscura", "https://test-streams.mux.dev/series/dark_s2e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Dark S03 E01 - Déjà-vu", "https://test-streams.mux.dev/series/dark_s3e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // Stranger Things
+        channels.add(Channel.create("Stranger Things S01 E01", "https://test-streams.mux.dev/series/st_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Stranger Things S01 E02", "https://test-streams.mux.dev/series/st_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Stranger Things S02 E01", "https://test-streams.mux.dev/series/st_s2e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Stranger Things S02 E04 - El espía", "https://test-streams.mux.dev/series/st_s2e4.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // Miércoles
+        channels.add(Channel.create("Miércoles S01 E01", "https://test-streams.mux.dev/series/wed_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("Miércoles S01 E02", "https://test-streams.mux.dev/series/wed_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // La casa de papel
+        channels.add(Channel.create("La casa de papel S01 E01", "https://test-streams.mux.dev/series/lcdp_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("La casa de papel S01 E02", "https://test-streams.mux.dev/series/lcdp_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("La casa de papel S02 E01", "https://test-streams.mux.dev/series/lcdp_s2e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // El juego del calamar
+        channels.add(Channel.create("El juego del calamar S01 E01", "https://test-streams.mux.dev/series/squid_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("El juego del calamar S01 E02", "https://test-streams.mux.dev/series/squid_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // The Crown
+        channels.add(Channel.create("The Crown S01 E01", "https://test-streams.mux.dev/series/crown_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(Channel.create("The Crown S01 E02", "https://test-streams.mux.dev/series/crown_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // Black Mirror
+        channels.add(Channel.create("Black Mirror S01 E01", "https://test-streams.mux.dev/series/bm_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // The Witcher
+        channels.add(Channel.create("The Witcher S01 E01", "https://test-streams.mux.dev/series/witcher_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // One Piece
+        channels.add(Channel.create("One Piece S01 E01", "https://test-streams.mux.dev/series/op_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // Lupin
+        channels.add(Channel.create("Lupin S01 E01", "https://test-streams.mux.dev/series/lupin_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // Élite
+        channels.add(Channel.create("Élite S01 E01", "https://test-streams.mux.dev/series/elite_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // You
+        channels.add(Channel.create("You S01 E01", "https://test-streams.mux.dev/series/you_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+
+        // Additional providers
+        channels.add(Channel.create("The Boys S01 E01", "https://test-streams.mux.dev/series/theboys_s1e1.mp4", "ES | SERIES AMAZON", "", "", "", ""));
+        channels.add(Channel.create("Succession S01 E01", "https://test-streams.mux.dev/series/succession_s1e1.mp4", "ES | SERIES HBO MAX", "", "", "", ""));
+
         Playlist result = new Playlist(DEMO_ID, "Lista de prueba", "demo:", channels, System.currentTimeMillis());
         put(result);
         return result;

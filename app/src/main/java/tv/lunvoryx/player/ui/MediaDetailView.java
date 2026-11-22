@@ -22,19 +22,23 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import tv.lunvoryx.player.R;
 import tv.lunvoryx.player.data.Channel;
+import tv.lunvoryx.player.data.EpisodeItem;
 import tv.lunvoryx.player.data.PlaylistRepository;
+import tv.lunvoryx.player.data.SeriesItem;
 import tv.lunvoryx.player.tmdb.TmdbClient;
 import static tv.lunvoryx.player.ui.TvStyle.dp;
 
 /**
  * Detailed movie and series view matching media_1795348517276_71f2fbc4.jpg & media_1795348607177_7f328d5a.jpg.
- * Includes cinematic backdrop, synopsis, Play button, YouTube trailer launcher, cast, ratings, and episodes.
+ * Includes cinematic backdrop, synopsis, Play button, YouTube trailer launcher, cast, ratings, and seasons/episodes.
  */
 public final class MediaDetailView extends FrameLayout {
     public interface Listener {
@@ -45,6 +49,7 @@ public final class MediaDetailView extends FrameLayout {
 
     private final Context context;
     private final Channel channel;
+    private final SeriesItem seriesItem;
     private final boolean isMovie;
     private final PlaylistRepository repository;
     private final Listener listener;
@@ -64,37 +69,58 @@ public final class MediaDetailView extends FrameLayout {
     private FrameLayout middleCard;
     private FrameLayout detailsCard;
 
+    // Episodes Card UI elements
+    private LinearLayout seasonsPillsRow;
+    private TextView episodesCountView;
+    private LinearLayout epListContainer;
+    private int activeSeason = 1;
+
     private TmdbClient.Details details;
     private String cleanTitle;
     private String cleanYear;
     private boolean isFavorite;
 
     public MediaDetailView(Context context, Channel channel, boolean isMovie, PlaylistRepository repository, Listener listener) {
+        this(context, channel, null, isMovie, repository, listener);
+    }
+
+    public MediaDetailView(Context context, SeriesItem seriesItem, PlaylistRepository repository, Listener listener) {
+        this(context, seriesItem != null ? seriesItem.representativeChannel : null, seriesItem, false, repository, listener);
+    }
+
+    public MediaDetailView(Context context, Channel channel, SeriesItem seriesItem, boolean isMovie, PlaylistRepository repository, Listener listener) {
         super(context);
         this.context = context;
         this.channel = channel;
+        this.seriesItem = seriesItem;
         this.isMovie = isMovie;
         this.repository = repository;
         this.listener = listener;
-        this.isFavorite = repository.isFavorite(channel.id);
+        this.isFavorite = seriesItem != null ? seriesItem.isFavorite(repository) : (channel != null && repository.isFavorite(channel.id));
         extractBasicMetadata();
         init();
         loadMetadata();
     }
 
     private void extractBasicMetadata() {
-        cleanTitle = channel.name;
-        cleanYear = "2026";
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(19\\d\\d|20\\d\\d)").matcher(channel.name);
-        if (m.find()) {
-            cleanYear = m.group(1);
+        if (seriesItem != null) {
+            cleanTitle = seriesItem.seriesTitle;
+            cleanYear = seriesItem.year;
+            return;
         }
-        // Clean title
+        cleanTitle = channel != null ? channel.name : "Título";
+        cleanYear = "2026";
+        if (channel != null) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(19\\d\\d|20\\d\\d)").matcher(channel.name);
+            if (m.find()) {
+                cleanYear = m.group(1);
+            }
+        }
         cleanTitle = cleanTitle.replaceAll("(?i)\\[.*?\\]", " ");
         cleanTitle = cleanTitle.replaceAll("(?i)\\b(1080p|720p|4k|uhd|fhd|hevc|x264|x265|latino|castellano|sub|dual)\\b", " ");
         cleanTitle = cleanTitle.replaceAll("\\(\\d{4}\\)", " ");
         cleanTitle = cleanTitle.replaceAll("\\s+", " ").trim();
-        if (cleanTitle.isEmpty()) cleanTitle = channel.name;
+        if (cleanTitle.isEmpty() && channel != null) cleanTitle = channel.name;
     }
 
     private void init() {
@@ -164,8 +190,10 @@ public final class MediaDetailView extends FrameLayout {
 
         // Metadata row (Year, duration/seasons, genre, badges)
         metaView = new TextView(context);
-        String metaText = isMovie ? (cleanYear + " · 2 h 08 min · " + (channel.group.isEmpty() ? "Película" : channel.group))
-                : (cleanYear + " · 3 temporadas · " + (channel.group.isEmpty() ? "Serie dramática" : channel.group));
+        String group = seriesItem != null ? seriesItem.group : (channel != null ? channel.group : "");
+        int seasonsCount = seriesItem != null ? seriesItem.getSeasonCount() : 3;
+        String metaText = isMovie ? (cleanYear + " · 2 h 08 min · " + (group.isEmpty() ? "Película" : group))
+                : (cleanYear + " · " + seasonsCount + (seasonsCount == 1 ? " temporada" : " temporadas") + " · " + (group.isEmpty() ? "Serie dramática" : group));
         metaView.setText(metaText);
         metaView.setTextSize(13.5f);
         metaView.setTextColor(0xFF9AACBE);
@@ -211,7 +239,15 @@ public final class MediaDetailView extends FrameLayout {
         actionsRow.setGravity(Gravity.CENTER_VERTICAL);
 
         btnPlay = buildActionButton("Reproducir", "play", true);
-        btnPlay.setOnClickListener(v -> { if (listener != null) listener.onPlay(channel); });
+        btnPlay.setOnClickListener(v -> {
+            if (listener != null) {
+                if (seriesItem != null) {
+                    listener.onPlay(seriesItem.getFirstEpisode());
+                } else if (channel != null) {
+                    listener.onPlay(channel);
+                }
+            }
+        });
         actionsRow.addView(btnPlay);
 
         btnTrailer = buildActionButton("Ver tráiler", "youtube", false);
@@ -223,8 +259,13 @@ public final class MediaDetailView extends FrameLayout {
         btnFav = buildActionButton(isFavorite ? "En mi lista" : "+ Mi lista", isFavorite ? "star" : "plus", false);
         btnFav.setOnClickListener(v -> {
             if (listener != null) {
-                listener.onToggleFavorite(channel);
-                isFavorite = repository.isFavorite(channel.id);
+                if (seriesItem != null && seriesItem.representativeChannel != null) {
+                    listener.onToggleFavorite(seriesItem.representativeChannel);
+                    isFavorite = seriesItem.isFavorite(repository);
+                } else if (channel != null) {
+                    listener.onToggleFavorite(channel);
+                    isFavorite = repository.isFavorite(channel.id);
+                }
                 btnFav.setText(isFavorite ? "En mi lista" : "+ Mi lista");
             }
         });
@@ -406,7 +447,6 @@ public final class MediaDetailView extends FrameLayout {
         title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         content.addView(title);
 
-        // Horizontal Row of Actors
         LinearLayout castRow = new LinearLayout(context);
         castRow.setOrientation(LinearLayout.HORIZONTAL);
         castRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -420,7 +460,6 @@ public final class MediaDetailView extends FrameLayout {
             actorCol.setOrientation(LinearLayout.VERTICAL);
             actorCol.setGravity(Gravity.CENTER_HORIZONTAL);
 
-            // Circle Avatar
             FrameLayout avatar = new FrameLayout(context);
             avatar.setBackground(TvStyle.squircleSolid(context, 24, 0xFF1B2640));
             LineIcon person = new LineIcon(context, "user");
@@ -442,7 +481,6 @@ public final class MediaDetailView extends FrameLayout {
             castRow.addView(actorCol, ap);
         }
 
-        // Bottom Rating Row
         LinearLayout ratingRow = new LinearLayout(context);
         ratingRow.setOrientation(LinearLayout.HORIZONTAL);
         ratingRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -487,7 +525,7 @@ public final class MediaDetailView extends FrameLayout {
         content.setOrientation(LinearLayout.VERTICAL);
         card.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
-        // Header + Season Pills
+        // Header + Episodes count
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -502,120 +540,194 @@ public final class MediaDetailView extends FrameLayout {
         View hSpacer = new View(context);
         header.addView(hSpacer, new LinearLayout.LayoutParams(0, 1, 1.0f));
 
-        TextView count = new TextView(context);
-        count.setText("8 episodios");
-        count.setTextSize(11);
-        count.setTextColor(0xFF8FA5C2);
-        header.addView(count);
+        episodesCountView = new TextView(context);
+        episodesCountView.setTextSize(11);
+        episodesCountView.setTextColor(0xFF8FA5C2);
+        header.addView(episodesCountView);
 
         content.addView(header);
 
-        // Season Pills: T1, T2, T3
-        LinearLayout pills = new LinearLayout(context);
-        pills.setOrientation(LinearLayout.HORIZONTAL);
-        pills.setGravity(Gravity.CENTER_VERTICAL);
+        // Season Pills: T1, T2, T3...
+        seasonsPillsRow = new LinearLayout(context);
+        seasonsPillsRow.setOrientation(LinearLayout.HORIZONTAL);
+        seasonsPillsRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-1, -2);
         plp.topMargin = dp(context, 8);
-        content.addView(pills, plp);
-
-        String[] seasons = {"T1", "T2", "T3"};
-        for (int i = 0; i < seasons.length; i++) {
-            TextView sp = new TextView(context);
-            sp.setText(seasons[i]);
-            sp.setTextSize(11.5f);
-            sp.setPadding(dp(context, 12), dp(context, 3), dp(context, 12), dp(context, 3));
-            if (i == 1) { // T2 active
-                sp.setTextColor(0xFFFFFFFF);
-                sp.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-                sp.setBackground(TvStyle.squircleSolid(context, 10, 0xFF007AFF));
-            } else {
-                sp.setTextColor(0xFFB0C2D6);
-                sp.setBackground(TvStyle.squircleCard(context, 10));
-            }
-            LinearLayout.LayoutParams spp = new LinearLayout.LayoutParams(-2, -2);
-            if (i > 0) spp.leftMargin = dp(context, 8);
-            pills.addView(sp, spp);
-        }
+        content.addView(seasonsPillsRow, plp);
 
         // Episodes Scroll List
         ScrollView epScroller = new ScrollView(context);
         epScroller.setVerticalScrollBarEnabled(false);
-        LinearLayout epList = new LinearLayout(context);
-        epList.setOrientation(LinearLayout.VERTICAL);
-        epScroller.addView(epList);
-
-        String[][] eps = {
-                {"Episodio 1 · La señal", "Una pista inesperada reabre el caso.", "48 min"},
-                {"Episodio 2 · Bajo la niebla", "El pasado del pueblo empieza a salir a la luz.", "51 min"},
-                {"Episodio 3 · Lo que escondemos", "Un hallazgo lo cambia todo.", "49 min"}
-        };
-
-        for (String[] ep : eps) {
-            LinearLayout row = new LinearLayout(context);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setFocusable(true);
-            row.setClickable(true);
-            row.setBackground(TvStyle.squircleCard(context, 10));
-            row.setPadding(dp(context, 8), dp(context, 6), dp(context, 10), dp(context, 6));
-
-            // Thumbnail
-            FrameLayout epThumb = new FrameLayout(context);
-            epThumb.setBackground(TvStyle.squircleSolid(context, 8, 0xFF1B2640));
-            ImageView iv = new ImageView(context);
-            iv.setImageBitmap(Artwork.get(context, R.drawable.category_series, 200));
-            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            epThumb.addView(iv, new FrameLayout.LayoutParams(-1, -1));
-            row.addView(epThumb, new LinearLayout.LayoutParams(dp(context, 64), dp(context, 36)));
-
-            // Text
-            LinearLayout textCol = new LinearLayout(context);
-            textCol.setOrientation(LinearLayout.VERTICAL);
-            textCol.setPadding(dp(context, 10), 0, dp(context, 8), 0);
-
-            TextView epTitle = new TextView(context);
-            epTitle.setText(ep[0]);
-            epTitle.setTextSize(11.5f);
-            epTitle.setTextColor(0xFFFFFFFF);
-            epTitle.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-            textCol.addView(epTitle);
-
-            TextView epSub = new TextView(context);
-            epSub.setText(ep[1]);
-            epSub.setTextSize(10);
-            epSub.setTextColor(0xFF8FA5C2);
-            textCol.addView(epSub);
-
-            row.addView(textCol, new LinearLayout.LayoutParams(0, -2, 1.0f));
-
-            TextView dur = new TextView(context);
-            dur.setText(ep[2]);
-            dur.setTextSize(10.5f);
-            dur.setTextColor(0xFF8FA5C2);
-            row.addView(dur);
-
-            // Play Icon
-            LineIcon pIcon = new LineIcon(context, "play");
-            pIcon.setColor(0xFF007AFF);
-            LinearLayout.LayoutParams pip = new LinearLayout.LayoutParams(dp(context, 16), dp(context, 16));
-            pip.leftMargin = dp(context, 8);
-            row.addView(pIcon, pip);
-
-            row.setOnClickListener(v -> { if (listener != null) listener.onPlay(channel); });
-            row.setOnFocusChangeListener((v, f) -> {
-                ((SquircleGlassDrawable) row.getBackground()).setFocused(f);
-            });
-
-            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
-            rlp.topMargin = dp(context, 6);
-            epList.addView(row, rlp);
-        }
+        epListContainer = new LinearLayout(context);
+        epListContainer.setOrientation(LinearLayout.VERTICAL);
+        epScroller.addView(epListContainer, new LayoutParams(-1, -2));
 
         LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(-1, 0, 1.0f);
         elp.topMargin = dp(context, 6);
         content.addView(epScroller, elp);
 
+        List<Integer> seasons = seriesItem != null ? seriesItem.getSeasons() : Arrays.asList(1, 2, 3);
+        if (seasons.isEmpty()) seasons = Collections.singletonList(1);
+        activeSeason = seasons.get(0);
+
+        renderSeasonPills(seasons);
+        renderEpisodesForSeason(activeSeason);
+
         return card;
+    }
+
+    private void renderSeasonPills(List<Integer> seasons) {
+        seasonsPillsRow.removeAllViews();
+        for (int i = 0; i < seasons.size(); i++) {
+            final int sNum = seasons.get(i);
+            TextView sp = new TextView(context);
+            sp.setText("T" + sNum);
+            sp.setTextSize(11.5f);
+            sp.setFocusable(true);
+            sp.setClickable(true);
+            sp.setPadding(dp(context, 12), dp(context, 3), dp(context, 12), dp(context, 3));
+
+            boolean isActive = (sNum == activeSeason);
+            applySeasonPillStyle(sp, isActive, false);
+
+            sp.setOnClickListener(v -> {
+                activeSeason = sNum;
+                renderSeasonPills(seasons);
+                renderEpisodesForSeason(activeSeason);
+            });
+
+            sp.setOnFocusChangeListener((v, f) -> {
+                applySeasonPillStyle(sp, sNum == activeSeason, f);
+                if (f) {
+                    activeSeason = sNum;
+                    renderEpisodesForSeason(activeSeason);
+                }
+            });
+
+            LinearLayout.LayoutParams spp = new LinearLayout.LayoutParams(-2, -2);
+            if (i > 0) spp.leftMargin = dp(context, 8);
+            seasonsPillsRow.addView(sp, spp);
+        }
+    }
+
+    private void applySeasonPillStyle(TextView sp, boolean isActive, boolean isFocused) {
+        if (isActive || isFocused) {
+            sp.setTextColor(0xFFFFFFFF);
+            sp.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            sp.setBackground(TvStyle.squircleSolid(context, 10, isActive ? 0xFF007AFF : 0xFF1E2D4A));
+        } else {
+            sp.setTextColor(0xFFB0C2D6);
+            sp.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+            sp.setBackground(TvStyle.squircleCard(context, 10));
+        }
+    }
+
+    private void renderEpisodesForSeason(int seasonNum) {
+        epListContainer.removeAllViews();
+        List<EpisodeItem> list = seriesItem != null ? seriesItem.getEpisodesForSeason(seasonNum) : null;
+
+        if (list == null || list.isEmpty()) {
+            // Fallback sample episodes if no real list available
+            String[][] sampleEps = {
+                    {"Episodio 1 · La señal", "Una pista inesperada reabre el caso.", "48 min"},
+                    {"Episodio 2 · Bajo la niebla", "El pasado del pueblo empieza a salir a la luz.", "51 min"},
+                    {"Episodio 3 · Lo que escondemos", "Un hallazgo lo cambia todo.", "49 min"}
+            };
+            episodesCountView.setText(sampleEps.length + " episodios");
+            for (String[] sep : sampleEps) {
+                View row = buildEpisodeRow(sep[0], sep[1], sep[2], null, null);
+                epListContainer.addView(row);
+            }
+            return;
+        }
+
+        episodesCountView.setText(list.size() + (list.size() == 1 ? " episodio" : " episodios"));
+        for (EpisodeItem ep : list) {
+            View row = buildEpisodeRow(ep.displayTitle, ep.subtitle, ep.duration, ep.channel.logoUrl, ep.channel);
+            epListContainer.addView(row);
+        }
+    }
+
+    private View buildEpisodeRow(String title, String subtitle, String duration, String logoUrl, Channel targetChannel) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setFocusable(true);
+        row.setClickable(true);
+        row.setBackground(TvStyle.squircleCard(context, 10));
+        row.setPadding(dp(context, 8), dp(context, 6), dp(context, 10), dp(context, 6));
+
+        // Thumbnail
+        FrameLayout epThumb = new FrameLayout(context);
+        epThumb.setBackground(TvStyle.squircleSolid(context, 8, 0xFF1B2640));
+        ImageView iv = new ImageView(context);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        if (logoUrl != null && !logoUrl.isEmpty()) {
+            LogoLoader.load(logoUrl, iv);
+        } else if (seriesItem != null && !seriesItem.logoUrl.isEmpty()) {
+            LogoLoader.load(seriesItem.logoUrl, iv);
+        } else {
+            iv.setImageBitmap(Artwork.get(context, R.drawable.category_series, 200));
+        }
+        epThumb.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+        row.addView(epThumb, new LinearLayout.LayoutParams(dp(context, 64), dp(context, 36)));
+
+        // Text Info
+        LinearLayout textCol = new LinearLayout(context);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        textCol.setPadding(dp(context, 10), 0, dp(context, 8), 0);
+
+        TextView epTitle = new TextView(context);
+        epTitle.setText(title);
+        epTitle.setTextSize(11.5f);
+        epTitle.setTextColor(0xFFFFFFFF);
+        epTitle.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        epTitle.setSingleLine(true);
+        epTitle.setEllipsize(TextUtils.TruncateAt.END);
+        textCol.addView(epTitle);
+
+        TextView epSub = new TextView(context);
+        epSub.setText(subtitle);
+        epSub.setTextSize(10);
+        epSub.setTextColor(0xFF8FA5C2);
+        epSub.setSingleLine(true);
+        epSub.setEllipsize(TextUtils.TruncateAt.END);
+        textCol.addView(epSub);
+
+        row.addView(textCol, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView dur = new TextView(context);
+        dur.setText(duration);
+        dur.setTextSize(10.5f);
+        dur.setTextColor(0xFF8FA5C2);
+        row.addView(dur);
+
+        // Play Icon
+        LineIcon pIcon = new LineIcon(context, "play");
+        pIcon.setColor(0xFF007AFF);
+        LinearLayout.LayoutParams pip = new LinearLayout.LayoutParams(dp(context, 16), dp(context, 16));
+        pip.leftMargin = dp(context, 8);
+        row.addView(pIcon, pip);
+
+        row.setOnClickListener(v -> {
+            if (listener != null) {
+                if (targetChannel != null) {
+                    listener.onPlay(targetChannel);
+                } else if (channel != null) {
+                    listener.onPlay(channel);
+                }
+            }
+        });
+
+        row.setOnFocusChangeListener((v, f) -> {
+            ((SquircleGlassDrawable) row.getBackground()).setFocused(f);
+            row.animate().scaleX(f ? 1.02f : 1.0f).scaleY(f ? 1.02f : 1.0f).setDuration(100).start();
+        });
+
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+        rlp.topMargin = dp(context, 6);
+        row.setLayoutParams(rlp);
+        return row;
     }
 
     private FrameLayout buildDetailsCard() {
@@ -803,14 +915,20 @@ public final class MediaDetailView extends FrameLayout {
                     }
                     if (d.releaseDate != null && d.releaseDate.length() >= 4) {
                         cleanYear = d.releaseDate.substring(0, 4);
-                        metaView.setText(cleanYear + (isMovie ? " · 2 h 08 min · " : " · 3 temporadas · ") + channel.group);
+                        String grp = seriesItem != null ? seriesItem.group : (channel != null ? channel.group : "");
+                        int sc = seriesItem != null ? seriesItem.getSeasonCount() : 3;
+                        metaView.setText(cleanYear + (isMovie ? " · 2 h 08 min · " : (" · " + sc + (sc == 1 ? " temporada · " : " temporadas · "))) + grp);
                     }
                     if (d.backdropUrl != null && !d.backdropUrl.isEmpty()) {
                         LogoLoader.load(d.backdropUrl, backdropImg);
                     }
                 });
-            } else if (!channel.logoUrl.isEmpty()) {
-                main.post(() -> LogoLoader.load(channel.logoUrl, backdropImg));
+            } else {
+                String fallbackLogo = seriesItem != null && !seriesItem.logoUrl.isEmpty() ? seriesItem.logoUrl
+                        : (channel != null && !channel.logoUrl.isEmpty() ? channel.logoUrl : "");
+                if (!fallbackLogo.isEmpty()) {
+                    main.post(() -> LogoLoader.load(fallbackLogo, backdropImg));
+                }
             }
         });
     }

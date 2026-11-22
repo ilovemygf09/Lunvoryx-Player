@@ -16,9 +16,19 @@ public class MediaKindTest {
 
     @Test public void classifiesAccentsAndWholeGroupWords() {
         assertEquals(MediaKind.MOVIE, MediaKind.classify(channel("Film", "https://tv.example/1.m3u8", "Películas de prueba")));
-        assertEquals(MediaKind.MOVIE, MediaKind.classify(channel("Film", "https://tv.example/1.m3u8", "ES | Cine")));
-        assertEquals(MediaKind.SERIES, MediaKind.classify(channel("Show", "https://tv.example/1.m3u8", "Series españolas")));
+        assertEquals(MediaKind.MOVIE, MediaKind.classify(channel("Film", "https://tv.example/1.m3u8", "ES | Películas 2026")));
+        // "Cine" groups with live streams (.m3u8, .ts) are live television channels
+        assertEquals(MediaKind.LIVE, MediaKind.classify(channel("M+ Cine HD", "https://tv.example/1.m3u8", "ES | Cine")));
+        assertEquals(MediaKind.LIVE, MediaKind.classify(channel("EU- ES M CINEMA", "https://tv.example/1.ts", "EU- ES M CINE")));
         assertEquals(MediaKind.LIVE, MediaKind.classify(channel("Channel", "https://tv.example/1.m3u8", "Cinemática")));
+    }
+
+    @Test public void classifiesLiveSeriesChannelsVsVodSeriesEpisodes() {
+        // Linear broadcast TV series channel (e.g. M+ Series)
+        assertEquals(MediaKind.LIVE, MediaKind.classify(channel("M+ Series HD", "https://tv.example/1.ts", "ES | SERIES")));
+        // Real VOD series episode
+        assertEquals(MediaKind.SERIES, MediaKind.classify(channel("Dark S01 E01", "https://tv.example/1.mp4", "ES | SERIES NETFLIX")));
+        assertEquals(MediaKind.SERIES, MediaKind.classify(channel("Stranger Things 1x01", "https://tv.example/1.ts", "Series españolas")));
     }
 
     @Test public void checksExtensionWithoutQueryString() {

@@ -5,6 +5,27 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
+## [1.2.0] - 2026-11-22
+
+### 🎬 Agrupación de Series por Temporadas y Ficha Interactiva de Capítulos
+- **1 Carátula por Serie (`SeriesParser` y `SeriesItem`):** Fin a la explosión de decenas de miles de carátulas en listas grandes. Todos los capítulos de una serie (`S01E01`, `1x01`, `T1 Cap. 1`, etc.) se indexan y consolidan automáticamente bajo una única carátula con título limpio, año y contador de temporadas (`X temps.`).
+- **Contador real de series únicas:** En listas masivas con ~80.000 episodios, el catálogo muestra con precisión el número de series reales (~3.700 series).
+- **Ficha de Serie Dinámica por Temporadas (`MediaDetailView`):**
+  - Selector interactivo de temporadas en cápsulas (`T1`, `T2`, `T3`...).
+  - Listado de episodios por temporada con miniatura, número, título de capítulo, duración y botón `(▶)` de reproducción directa del stream específico.
+  - Botón de tráiler oficial en YouTube, reparto con avatares, valoración estelar y especificaciones de calidad 4K HDR.
+
+### 📺 Clasificación Estricta de TV en Vivo vs. Películas
+- **Eliminación de canales lineales en Películas:** Canales con temáticas de cine (p. ej. `M+ Cine`, `EU- ES M CINE`, `ES | Cine`) o flujos lineales (`.m3u8`, `.ts`) con indicadores de directo se clasifican exclusivamente como **TV en vivo** y nunca contaminan el catálogo VOD de Películas.
+- **Detección refinada en `MediaKind`:** Reglas avanzadas para separar canales 24/7 y emisiones deportivas de películas y series VOD auténticas.
+
+### 🎨 Ajustes de Diseño y Navegación
+- **Alineación exacta del logotipo:** El logo de Lunvoryx Player se fija en el margen superior izquierdo exacto de la pantalla (`64 dp`).
+- **Píldora de caducidad completa:** Ajuste de anchura y padding para visualizar completamente *"Tu lista caduca: DD/MM/AAAA"* sin cortes.
+- **Acción de recarga de catálogo:** El botón *Recargar lista* del mosaico de inicio fuerza la sincronización y actualización inmediata de la lista activa.
+
+---
+
 ## [1.1.1] - 2026-11-22
 
 ### 🐛 Correcciones en Modo Intuitivo (Layout y Navegación D-Pad)
