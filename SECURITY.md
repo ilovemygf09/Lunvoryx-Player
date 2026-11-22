@@ -43,7 +43,7 @@ Si descubres una posible vulnerabilidad de seguridad o defecto de protección de
 ### 2. Emparejamiento Local Seguro vía QR
 * El servidor HTTP empotrado para la importación desde teléfonos móviles (`RemoteServer.java`) genera un token criptográfico efímero de 128 bits mediante `java.security.SecureRandom`.
 * Toda petición desde el navegador requiere validar dicho token mediante la cabecera `X-Session-Token` o parámetro autenticado.
-* Protección contra agotamiento de memoria con límite máximo de carga de 25 MB y temporizador de apagado automático por inactividad tras 15 minutos.
+* Protección de memoria con búferes optimizados, límite seguro de 250 MB y temporizador de apagado automático por inactividad tras 15 minutos.
 
 ### 3. Blindaje Criptográfico de Actualizaciones OTA
 * El módulo `UpdateManager.java` consulta endpoints seguros `https://` y valida que el paquete descargado corresponda estrictamente a `tv.lunvoryx.player`.

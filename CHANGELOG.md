@@ -5,6 +5,16 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
+## [1.0.1] - 2026-11-22
+
+### 🚀 Optimización de Importación y Soporte de Listas Masivas
+- **Límite de listas ampliado a 250 MB:** Aumento drástico del umbral máximo de descarga e importación de listas M3U / M3U8 de 20 MB a **250 MB** en `PlaylistRepository.java`, permitiendo cargar catálogos completos con decenas de miles de películas y series VOD.
+- **Capacidad ampliada a 150.000 canales:** `M3uParser.java` eleva el límite de elementos indexables de 50.000 a **150.000 canales/entradas**.
+- **Servidor Web Móvil (QR) optimizado:** `RemoteServer.java` incrementa el límite de subida directa a 250 MB y actualiza la validación en el cliente web móvil.
+- **Memoria de alto rendimiento (`largeHeap`):** Activación de `android:largeHeap="true"` en `AndroidManifest.xml` para garantizar suficiente memoria heap en la máquina virtual de Android TV durante el procesamiento de listas de gran tamaño.
+- **Tiempos de espera ampliados:** Incremento de los timeouts de red y descarga a 180 segundos para prevenir desconexiones en conexiones Wi-Fi con listas pesadas.
+- **Guía EPG optimizada:** Aumento del límite de descarga de guías XMLTV a 64 MB (180 MB descomprimido).
+
 ## [1.0.0] - 2026-11-21
 
 Lanzamiento oficial inicial de Lunvoryx Player para Android TV, Google TV y Fire OS.

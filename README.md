@@ -57,7 +57,7 @@
   * Anillo de foco en plata nácar (`0xFFFFFFFF` $\to$ `0xC4D2E0`) con halo difuso de sombra suave (`0x44FFFFFF`).
 
 ### 📱 2. Importación Multifuncional y Servidor Local vía QR
-* **Desde tu móvil por Wi-Fi:** Servidor HTTP multi-hilo local empotrado (`tv.lunvoryx.player.remote.RemoteServer`) en puerto 8080. Al escanear el QR, se abre una aplicación web responsive protegida por tokens criptográficos temporales (`SecureRandom`), límite de carga de 25 MB y apagado automático por inactividad tras 15 minutos.
+* **Desde tu móvil por Wi-Fi:** Servidor HTTP multi-hilo local empotrado (`tv.lunvoryx.player.remote.RemoteServer`) en puerto 8080. Al escanear el QR, se abre una aplicación web responsive protegida por tokens criptográficos temporales (`SecureRandom`), límite ampliado de 250 MB (soporte para listas masivas y VOD de hasta 150.000 canales) y apagado automático por inactividad tras 15 minutos.
 * **Xtream Codes API:** Soporte nativo para URL de servidor, usuario y contraseña con autogeneración de streams HLS/TS.
 * **Enlace M3U / M3U8:** Descarga e importación por URL directa con soporte de cabeceras (`User-Agent`, `Referer`).
 * **Archivo Local:** Selección de archivos `.m3u` o `.m3u8` desde almacenamiento interno o memorias USB.

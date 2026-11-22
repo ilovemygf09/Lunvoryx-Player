@@ -33,7 +33,7 @@ import java.util.zip.GZIPInputStream;
 
 /** A local-first catalogue. Call load/import/refresh/remove on a worker, never the UI thread. */
 public final class PlaylistRepository {
-    public static final int MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+    public static final int MAX_IMPORT_BYTES = 250 * 1024 * 1024; // 250 MB max playlist size
     private static final String DEMO_ID = "lunvoryx-demo";
     private static final Object PREFERENCES_LOCK = new Object();
     private final Context context;
@@ -53,7 +53,7 @@ public final class PlaylistRepository {
         if (loaded) return getPlaylists();
         List<Playlist> restored = new ArrayList<>();
         try (InputStream stream = storage.openRead()) {
-            JSONObject root = new JSONObject(readText(stream, MAX_IMPORT_BYTES * 5));
+            JSONObject root = new JSONObject(readText(stream, (int) Math.min(Integer.MAX_VALUE - 8, (long) MAX_IMPORT_BYTES * 2)));
             JSONArray lists = root.optJSONArray("playlists");
             if (lists != null) for (int i = 0; i < lists.length(); i++) {
                 JSONObject item = lists.getJSONObject(i);
@@ -253,7 +253,7 @@ public final class PlaylistRepository {
             }
             root.put("playlists", lists);
             byte[] encoded = root.toString().getBytes(StandardCharsets.UTF_8);
-            if (encoded.length > MAX_IMPORT_BYTES * 5) throw new IOException("La biblioteca supera el tamaño máximo permitido.");
+            if (encoded.length > (long) MAX_IMPORT_BYTES * 2) throw new IOException("La biblioteca supera el tamaño máximo permitido.");
             stream = storage.startWrite();
             stream.write(encoded);
             storage.finishWrite(stream);
@@ -282,15 +282,15 @@ public final class PlaylistRepository {
 
     private static Download download(String source) throws IOException {
         String current = source;
-        long deadline = System.nanoTime() + 60_000_000_000L;
+        long deadline = System.nanoTime() + 180_000_000_000L;
         for (int redirects = 0; redirects <= 5; redirects++) {
             HttpURLConnection connection = null;
             try {
                 long remainingMillis = (deadline - System.nanoTime()) / 1_000_000L;
                 if (remainingMillis <= 0) throw new java.net.SocketTimeoutException();
                 connection = (HttpURLConnection) new URL(current).openConnection();
-                connection.setConnectTimeout((int) Math.min(15_000, Math.max(1, remainingMillis)));
-                connection.setReadTimeout((int) Math.min(20_000, Math.max(1, remainingMillis)));
+                connection.setConnectTimeout((int) Math.min(20_000, Math.max(1, remainingMillis)));
+                connection.setReadTimeout((int) Math.min(60_000, Math.max(1, remainingMillis)));
                 connection.setInstanceFollowRedirects(false);
                 connection.setRequestProperty("User-Agent", "LunvoryxTV/1.0");
                 connection.setRequestProperty("Accept", "application/vnd.apple.mpegurl, application/x-mpegURL, text/plain, */*");
@@ -304,7 +304,7 @@ public final class PlaylistRepository {
                 }
                 if (status < 200 || status >= 300) throw new IOException("El servidor ha respondido con el código " + status + ".");
                 long size = connection.getContentLength();
-                if (size > MAX_IMPORT_BYTES) throw new IOException("La lista supera el límite de 20 MB.");
+                if (size > MAX_IMPORT_BYTES) throw new IOException("La lista supera el límite de 250 MB.");
                 InputStream input = connection.getInputStream();
                 if ("gzip".equalsIgnoreCase(connection.getContentEncoding())) input = new GZIPInputStream(input);
                 try (InputStream stream = input) { return new Download(readText(stream, MAX_IMPORT_BYTES, deadline), current); }
@@ -324,15 +324,15 @@ public final class PlaylistRepository {
     }
 
     private static String readText(InputStream stream, int limit, long deadline) throws IOException {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        byte[] buffer = new byte[16 * 1024];
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(Math.min(limit, 1024 * 1024));
+        byte[] buffer = new byte[32 * 1024];
         int count;
         int total = 0;
         while ((count = stream.read(buffer)) != -1) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Importación cancelada.");
             if (System.nanoTime() > deadline) throw new java.net.SocketTimeoutException();
             total += count;
-            if (total > limit) throw new IOException("El archivo supera el tamaño máximo permitido.");
+            if (total > limit) throw new IOException("El archivo supera el tamaño máximo permitido (250 MB).");
             bytes.write(buffer, 0, count);
         }
         return bytes.toString(StandardCharsets.UTF_8.name());

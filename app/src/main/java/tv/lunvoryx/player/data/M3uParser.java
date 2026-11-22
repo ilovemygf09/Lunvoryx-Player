@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 
 /** Streaming line parser for extended M3U. Android-independent so edge cases can be tested on the JVM. */
 public final class M3uParser {
-    public static final int MAX_CHANNELS = 50_000;
+    public static final int MAX_CHANNELS = 150_000;
     private static final Pattern ATTRIBUTE = Pattern.compile("([\\w-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s]+))");
     private M3uParser() { }
 
@@ -75,7 +75,7 @@ public final class M3uParser {
                                 group.isEmpty() ? extGroup : group, resolvedLogo == null ? "" : resolvedLogo,
                                 tvgId, userAgent, referer);
                         if (!channels.containsKey(channel.id)) channels.put(channel.id, channel);
-                        if (channels.size() > MAX_CHANNELS) throw new IllegalArgumentException("La lista supera el límite de 50.000 canales.");
+                        if (channels.size() > MAX_CHANNELS) throw new IllegalArgumentException("La lista supera el límite de 150.000 canales.");
                     }
                     name = ""; group = ""; logo = ""; tvgId = ""; userAgent = ""; referer = ""; extGroup = "";
                 }

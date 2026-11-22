@@ -30,7 +30,7 @@ public final class RemoteServer {
         default void onNavigateBack() {}
     }
 
-    public static final long MAX_PAYLOAD_BYTES = 25 * 1024 * 1024; // 25 MB max payload guard
+    public static final long MAX_PAYLOAD_BYTES = 250L * 1024 * 1024; // 250 MB max payload guard
     private static final long INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 min auto-shutdown
 
     private final Listener listener;
@@ -251,7 +251,7 @@ public final class RemoteServer {
             } else if ("POST".equalsIgnoreCase(method) && path.startsWith("/api/playlist")) {
                 // Size validation guard to prevent memory exhaustion
                 if (contentLength > MAX_PAYLOAD_BYTES) {
-                    byte[] err = "{\"error\":\"El tamaño excede el límite máximo seguro permitido (25 MB).\"}".getBytes(StandardCharsets.UTF_8);
+                    byte[] err = "{\"error\":\"El tamaño excede el límite máximo seguro permitido (250 MB).\"}".getBytes(StandardCharsets.UTF_8);
                     String headers = "HTTP/1.1 413 Payload Too Large\r\n" +
                             "Content-Type: application/json; charset=UTF-8\r\n" +
                             "Access-Control-Allow-Origin: *\r\n" +
@@ -1255,8 +1255,8 @@ public final class RemoteServer {
                 "    function handleFileSelected(input) {\n" +
                 "      const file = input.files[0];\n" +
                 "      if (!file) return;\n" +
-                "      if (file.size > 25 * 1024 * 1024) {\n" +
-                "        showToast('El archivo no debe superar 25 MB');\n" +
+                "      if (file.size > 250 * 1024 * 1024) {\n" +
+                "        showToast('El archivo no debe superar 250 MB');\n" +
                 "        return;\n" +
                 "      }\n" +
                 "      document.getElementById('file-selected-title').innerText = file.name;\n" +

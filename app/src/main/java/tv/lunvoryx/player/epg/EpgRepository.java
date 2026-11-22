@@ -26,8 +26,8 @@ import java.util.zip.GZIPInputStream;
 
 /** Disk and network methods must be called on a worker. Lookups never perform I/O. */
 public final class EpgRepository {
-    private static final long MAX_DOWNLOAD = 24L * 1024 * 1024;
-    private static final long MAX_EXPANDED = 64L * 1024 * 1024;
+    private static final long MAX_DOWNLOAD = 64L * 1024 * 1024;
+    private static final long MAX_EXPANDED = 180L * 1024 * 1024;
     private static final long MAX_DURATION_MS = 120000;
     private final AtomicFile cache;
     private final SharedPreferences preferences;
@@ -111,7 +111,7 @@ public final class EpgRepository {
                     continue;
                 }
                 if (status < 200 || status >= 300) throw new IOException("La fuente XMLTV devuelve un error HTTP " + status + ".");
-                if (connection.getContentLength() > MAX_DOWNLOAD) throw new IOException("La descarga de la guía supera los 24 MB.");
+                if (connection.getContentLength() > MAX_DOWNLOAD) throw new IOException("La descarga de la guía supera los 64 MB.");
                 break;
             }
             if (connection == null) throw new IOException("No se pudo abrir la guía.");
