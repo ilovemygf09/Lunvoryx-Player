@@ -26,6 +26,7 @@ import tv.lunvoryx.player.epg.Program;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -295,6 +296,9 @@ public final class LiveTvBrowseView extends LinearLayout {
         // Vertical Channels List
         channelList = new RecyclerView(context);
         channelList.setLayoutManager(new LinearLayoutManager(context));
+        channelList.setHasFixedSize(true);
+        channelList.setItemViewCacheSize(20);
+        channelList.getRecycledViewPool().setMaxRecycledViews(0, 30);
         channelList.setItemAnimator(null);
         channelAdapter = new ChannelRowAdapter();
         channelList.setAdapter(channelAdapter);
@@ -540,11 +544,7 @@ public final class LiveTvBrowseView extends LinearLayout {
 
     private void loadData() {
         fullChannels.clear();
-        for (Channel c : repository.getAllChannels()) {
-            if (MediaKind.classify(c) == MediaKind.LIVE) {
-                fullChannels.add(c);
-            }
-        }
+        fullChannels.addAll(repository.getLiveChannels());
 
         buildCategoryList();
         renderCategories();
@@ -554,7 +554,7 @@ public final class LiveTvBrowseView extends LinearLayout {
     private void buildCategoryList() {
         categories.clear();
         Set<String> favIds = repository.getFavoriteIds();
-        List<String> recents = repository.getRecentIds();
+        Set<String> recents = new HashSet<>(repository.getRecentIds());
 
         // 1. Todas
         categories.add(new CategoryItem("all", AppStrings.isEnglish(context) ? "All" : "Todas", "all_grid", fullChannels.size()));
@@ -684,7 +684,7 @@ public final class LiveTvBrowseView extends LinearLayout {
     private void applyFilterAndSort() {
         filteredChannels.clear();
         Set<String> favIds = repository.getFavoriteIds();
-        List<String> recents = repository.getRecentIds();
+        Set<String> recents = new HashSet<>(repository.getRecentIds());
 
         for (Channel c : fullChannels) {
             if ("favorites".equals(selectedCatId) && !favIds.contains(c.id)) continue;
@@ -783,6 +783,17 @@ public final class LiveTvBrowseView extends LinearLayout {
 
     // ADAPTER FOR CHANNEL ROWS
     private final class ChannelRowAdapter extends RecyclerView.Adapter<ChannelRowHolder> {
+        ChannelRowAdapter() {
+            setHasStableIds(true);
+        }
+
+        @Override public long getItemId(int position) {
+            if (position >= 0 && position < filteredChannels.size()) {
+                return filteredChannels.get(position).id.hashCode();
+            }
+            return position;
+        }
+
         @Override public ChannelRowHolder onCreateViewHolder(ViewGroup parent, int viewType) {
             return new ChannelRowHolder();
         }

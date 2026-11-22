@@ -20,10 +20,13 @@ public enum MediaKind {
     public static MediaKind classify(Channel channel) {
         if (channel == null) return LIVE;
         String path = "";
-        try {
-            String rawPath = URI.create(channel.url).getPath();
-            if (rawPath != null) path = rawPath.toLowerCase(Locale.ROOT);
-        } catch (IllegalArgumentException ignored) { }
+        if (channel.url != null) {
+            String u = channel.url;
+            int q = u.indexOf('?');
+            String sub = q >= 0 ? u.substring(0, q) : u;
+            int h = sub.indexOf('#');
+            path = (h >= 0 ? sub.substring(0, h) : sub).toLowerCase(Locale.ROOT);
+        }
 
         // 1. Explicit provider routes are stronger evidence than broad editorial groups
         if (path.contains("/series/")) return SERIES;
@@ -64,7 +67,17 @@ public enum MediaKind {
     }
 
     private static String normalize(String value) {
-        if (value == null) return "";
+        if (value == null || value.isEmpty()) return "";
+        boolean hasNonAscii = false;
+        for (int i = 0; i < value.length(); i++) {
+            if (value.charAt(i) >= 128) {
+                hasNonAscii = true;
+                break;
+            }
+        }
+        if (!hasNonAscii) {
+            return value.toLowerCase(Locale.ROOT);
+        }
         return MARKS.matcher(Normalizer.normalize(value, Normalizer.Form.NFD)).replaceAll("").toLowerCase(Locale.ROOT);
     }
 }

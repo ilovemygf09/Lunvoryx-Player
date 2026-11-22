@@ -3,6 +3,8 @@ package tv.lunvoryx.player.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.AtomicFile;
 
 import org.json.JSONArray;
@@ -29,6 +31,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.zip.GZIPInputStream;
 
 /** A local-first catalogue. Call load/import/refresh/remove on a worker, never the UI thread. */
@@ -42,6 +46,15 @@ public final class PlaylistRepository {
     // Readers use immutable snapshots and never wait behind a download or disk write.
     private volatile List<Playlist> playlists = Collections.emptyList();
     private boolean loaded;
+
+    // Media snapshot caches
+    private volatile List<Channel> cachedAllChannels;
+    private volatile List<Channel> cachedLiveChannels;
+    private volatile List<Channel> cachedMovieChannels;
+    private volatile List<Channel> cachedSeriesChannels;
+    private volatile List<SeriesItem> cachedGroupedSeries;
+    private final Object mediaCacheLock = new Object();
+    private final ExecutorService mediaCacheExecutor = Executors.newSingleThreadExecutor();
 
     public PlaylistRepository(Context context) {
         this.context = context.getApplicationContext();
@@ -81,6 +94,8 @@ public final class PlaylistRepository {
                 addDemoPlaylist();
             } catch (Exception ignored) {}
         }
+        invalidateMediaCache();
+        precomputeMediaCacheAsync();
         return getPlaylists();
     }
 
@@ -88,12 +103,116 @@ public final class PlaylistRepository {
         return playlists;
     }
 
-    public List<Channel> getAllChannels() {
-        Map<String, Channel> unique = new LinkedHashMap<>();
-        for (Playlist playlist : playlists) for (Channel channel : playlist.channels) {
-            if (!unique.containsKey(channel.id)) unique.put(channel.id, channel);
+    public void invalidateMediaCache() {
+        synchronized (mediaCacheLock) {
+            cachedAllChannels = null;
+            cachedLiveChannels = null;
+            cachedMovieChannels = null;
+            cachedSeriesChannels = null;
+            cachedGroupedSeries = null;
         }
-        return new ArrayList<>(unique.values());
+    }
+
+    public List<Channel> getAllChannels() {
+        List<Channel> cached = cachedAllChannels;
+        if (cached != null) return cached;
+        synchronized (mediaCacheLock) {
+            if (cachedAllChannels != null) return cachedAllChannels;
+            Map<String, Channel> unique = new LinkedHashMap<>();
+            for (Playlist playlist : playlists) for (Channel channel : playlist.channels) {
+                if (!unique.containsKey(channel.id)) unique.put(channel.id, channel);
+            }
+            cachedAllChannels = Collections.unmodifiableList(new ArrayList<>(unique.values()));
+            return cachedAllChannels;
+        }
+    }
+
+    public List<Channel> getLiveChannels() {
+        List<Channel> cached = cachedLiveChannels;
+        if (cached != null) return cached;
+        synchronized (mediaCacheLock) {
+            if (cachedLiveChannels != null) return cachedLiveChannels;
+            List<Channel> list = new ArrayList<>();
+            for (Channel c : getAllChannels()) {
+                if (c.getKind() == MediaKind.LIVE) list.add(c);
+            }
+            cachedLiveChannels = Collections.unmodifiableList(list);
+            return cachedLiveChannels;
+        }
+    }
+
+    public List<Channel> getMovieChannels() {
+        List<Channel> cached = cachedMovieChannels;
+        if (cached != null) return cached;
+        synchronized (mediaCacheLock) {
+            if (cachedMovieChannels != null) return cachedMovieChannels;
+            List<Channel> list = new ArrayList<>();
+            for (Channel c : getAllChannels()) {
+                if (c.getKind() == MediaKind.MOVIE) list.add(c);
+            }
+            cachedMovieChannels = Collections.unmodifiableList(list);
+            return cachedMovieChannels;
+        }
+    }
+
+    public List<Channel> getSeriesChannels() {
+        List<Channel> cached = cachedSeriesChannels;
+        if (cached != null) return cached;
+        synchronized (mediaCacheLock) {
+            if (cachedSeriesChannels != null) return cachedSeriesChannels;
+            List<Channel> list = new ArrayList<>();
+            for (Channel c : getAllChannels()) {
+                if (c.getKind() == MediaKind.SERIES) list.add(c);
+            }
+            cachedSeriesChannels = Collections.unmodifiableList(list);
+            return cachedSeriesChannels;
+        }
+    }
+
+    public List<SeriesItem> peekGroupedSeries() {
+        return cachedGroupedSeries;
+    }
+
+    public List<SeriesItem> getGroupedSeries() {
+        List<SeriesItem> cached = cachedGroupedSeries;
+        if (cached != null) return cached;
+        synchronized (mediaCacheLock) {
+            if (cachedGroupedSeries != null) return cachedGroupedSeries;
+            List<Channel> seriesChannels = getSeriesChannels();
+            List<SeriesItem> grouped = SeriesParser.groupSeries(seriesChannels);
+            cachedGroupedSeries = Collections.unmodifiableList(grouped);
+            return cachedGroupedSeries;
+        }
+    }
+
+    public interface SeriesCallback {
+        void onLoaded(List<SeriesItem> series);
+    }
+
+    public void loadGroupedSeriesAsync(SeriesCallback callback) {
+        List<SeriesItem> cached = cachedGroupedSeries;
+        if (cached != null) {
+            if (callback != null) callback.onLoaded(cached);
+            return;
+        }
+        mediaCacheExecutor.execute(() -> {
+            List<SeriesItem> result = getGroupedSeries();
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if (callback != null) callback.onLoaded(result);
+            });
+        });
+    }
+
+    public void precomputeMediaCacheAsync() {
+        mediaCacheExecutor.execute(() -> {
+            try {
+                getAllChannels();
+                getLiveChannels();
+                getMovieChannels();
+                getSeriesChannels();
+                getGroupedSeries();
+            } catch (Exception ignored) {}
+        });
     }
 
     public Channel findChannel(String id) {
@@ -251,6 +370,8 @@ public final class PlaylistRepository {
         for (int i = next.size() - 1; i >= 0; i--) if (next.get(i).id.equals(id)) next.remove(i);
         save(next);
         playlists = Collections.unmodifiableList(next);
+        invalidateMediaCache();
+        precomputeMediaCacheAsync();
     }
 
     public boolean isFavorite(String channelId) { return getFavoriteIds().contains(channelId); }
@@ -308,6 +429,8 @@ public final class PlaylistRepository {
         if (existingIndex >= 0) next.set(existingIndex, playlist); else next.add(playlist);
         save(next);
         playlists = Collections.unmodifiableList(next);
+        invalidateMediaCache();
+        precomputeMediaCacheAsync();
     }
 
     private void save(List<Playlist> data) throws IOException {

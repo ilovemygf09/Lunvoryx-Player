@@ -1,6 +1,7 @@
 package tv.lunvoryx.player.data;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -17,6 +18,13 @@ public final class SeriesParser {
     private static final Pattern PREFIX_COUNTRY = Pattern.compile("^(?:[A-Z]{2,3}\\s*[:|\\-]\\s*)");
     private static final Pattern YEAR_PATTERN = Pattern.compile("(19\\d\\d|20\\d\\d)");
     private static final Pattern MULTI_SPACES = Pattern.compile("\\s+");
+    private static final Pattern PAREN_YEAR = Pattern.compile("\\(\\s*(?:19|20)\\d{2}\\s*\\)");
+    private static final Pattern STANDALONE_YEAR = Pattern.compile("(?:19|20)\\d{2}");
+    private static final Pattern TRIM_PUNCT = Pattern.compile("^[ ._\\-:]+|[ ._\\-:]+$");
+    private static final Pattern LEADING_SEPARATORS = Pattern.compile("^[ ._\\-:]+");
+    private static final Pattern PARENS = Pattern.compile("\\(.*?\\)");
+
+    private static final Map<String, String> TITLE_CACHE = new ConcurrentHashMap<>(4096);
 
     private SeriesParser() {}
 
@@ -83,12 +91,12 @@ public final class SeriesParser {
         String sub = "";
         if (markerEnd > 0 && markerEnd < name.length()) {
             String tail = name.substring(markerEnd).trim();
-            tail = tail.replaceAll("^[ ._\\-:]+", ""); // strip leading separators
+            tail = LEADING_SEPARATORS.matcher(tail).replaceAll("");
             tail = QUALITY_TAGS.matcher(tail).replaceAll(" ");
             tail = BRACKETS.matcher(tail).replaceAll(" ");
             tail = MULTI_SPACES.matcher(tail).replaceAll(" ").trim();
             // remove trailing parenthesized items
-            tail = tail.replaceAll("\\(.*?\\)", "").trim();
+            tail = PARENS.matcher(tail).replaceAll("").trim();
             if (tail.length() > 1) {
                 sub = tail;
             }
@@ -110,19 +118,27 @@ public final class SeriesParser {
     }
 
     public static String cleanSeriesTitle(String text) {
-        if (text == null) return "";
+        if (text == null || text.isEmpty()) return "";
+        String cached = TITLE_CACHE.get(text);
+        if (cached != null) return cached;
+
         String s = PREFIX_COUNTRY.matcher(text).replaceFirst("");
         s = BRACKETS.matcher(s).replaceAll(" ");
         s = QUALITY_TAGS.matcher(s).replaceAll(" ");
-        s = s.replaceAll("\\(\\s*(?:19|20)\\d{2}\\s*\\)", " "); // (2024)
-        s = s.replaceAll("(?:19|20)\\d{2}", " "); // standalone year
-        s = s.replaceAll("^[ ._\\-:]+|[ ._\\-:]+$", " "); // strip outer punctuation
+        s = PAREN_YEAR.matcher(s).replaceAll(" ");
+        s = STANDALONE_YEAR.matcher(s).replaceAll(" ");
+        s = TRIM_PUNCT.matcher(s).replaceAll(" ");
         s = MULTI_SPACES.matcher(s).replaceAll(" ").trim();
+
+        if (TITLE_CACHE.size() < 10000) {
+            TITLE_CACHE.put(text, s);
+        }
         return s;
     }
 
     public static List<SeriesItem> groupSeries(List<Channel> channels) {
-        Map<String, SeriesBuilder> map = new LinkedHashMap<>();
+        if (channels == null || channels.isEmpty()) return Collections.emptyList();
+        Map<String, SeriesBuilder> map = new LinkedHashMap<>(Math.min(channels.size(), 4096));
 
         for (Channel c : channels) {
             ParsedEpisode pe = parseEpisode(c);

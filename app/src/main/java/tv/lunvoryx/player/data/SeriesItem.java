@@ -2,8 +2,10 @@ package tv.lunvoryx.player.data;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class SeriesItem {
     public final String seriesTitle;
@@ -52,20 +54,29 @@ public final class SeriesItem {
         return representativeChannel;
     }
 
-    public boolean isFavorite(PlaylistRepository repository) {
-        if (representativeChannel != null && repository.isFavorite(representativeChannel.id)) return true;
+    public boolean isFavorite(Set<String> favoriteIds) {
+        if (favoriteIds == null || favoriteIds.isEmpty()) return false;
+        if (representativeChannel != null && favoriteIds.contains(representativeChannel.id)) return true;
         for (Channel c : allEpisodeChannels) {
-            if (repository.isFavorite(c.id)) return true;
+            if (favoriteIds.contains(c.id)) return true;
         }
         return false;
     }
 
-    public boolean hasRecent(PlaylistRepository repository) {
-        List<String> recents = repository.getRecentIds();
-        if (representativeChannel != null && recents.contains(representativeChannel.id)) return true;
+    public boolean hasRecent(Set<String> recentIds) {
+        if (recentIds == null || recentIds.isEmpty()) return false;
+        if (representativeChannel != null && recentIds.contains(representativeChannel.id)) return true;
         for (Channel c : allEpisodeChannels) {
-            if (recents.contains(c.id)) return true;
+            if (recentIds.contains(c.id)) return true;
         }
         return false;
+    }
+
+    public boolean isFavorite(PlaylistRepository repository) {
+        return isFavorite(repository.getFavoriteIds());
+    }
+
+    public boolean hasRecent(PlaylistRepository repository) {
+        return hasRecent(new HashSet<>(repository.getRecentIds()));
     }
 }

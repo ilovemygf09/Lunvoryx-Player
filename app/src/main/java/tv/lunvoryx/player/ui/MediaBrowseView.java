@@ -12,10 +12,12 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import java.util.HashSet;
 import tv.lunvoryx.player.R;
 import tv.lunvoryx.player.data.Channel;
 import tv.lunvoryx.player.data.MediaKind;
@@ -82,6 +84,8 @@ public final class MediaBrowseView extends LinearLayout {
     private TextView catHeaderBadge;
     private RecyclerView posterGrid;
     private PosterAdapter posterAdapter;
+    private LinearLayout loadingLayout;
+    private TextView loadingText;
 
     // Preview Panel
     private ImageView previewPoster;
@@ -245,14 +249,42 @@ public final class MediaBrowseView extends LinearLayout {
 
         col.addView(subHeader);
 
+        FrameLayout gridContainer = new FrameLayout(context);
+
         // Grid of Posters: 6 columns in Intuitive Mode for full screen, 5 columns in Classic Mode
         int spanCount = isIntuitive ? 6 : 5;
         posterGrid = new RecyclerView(context);
         posterGrid.setLayoutManager(new GridLayoutManager(context, spanCount));
+        posterGrid.setHasFixedSize(true);
+        posterGrid.setItemViewCacheSize(24);
+        posterGrid.getRecycledViewPool().setMaxRecycledViews(0, 36);
         posterAdapter = new PosterAdapter();
         posterGrid.setAdapter(posterAdapter);
         posterGrid.setVerticalScrollBarEnabled(false);
-        col.addView(posterGrid, new LayoutParams(-1, 0, 1));
+        gridContainer.addView(posterGrid, new FrameLayout.LayoutParams(-1, -1));
+
+        loadingLayout = new LinearLayout(context);
+        loadingLayout.setOrientation(VERTICAL);
+        loadingLayout.setGravity(Gravity.CENTER);
+        ProgressBar spinner = new ProgressBar(context);
+        spinner.setIndeterminate(true);
+        if (spinner.getIndeterminateDrawable() != null) {
+            spinner.getIndeterminateDrawable().setColorFilter(0xFF007AFF, android.graphics.PorterDuff.Mode.SRC_IN);
+        }
+        loadingLayout.addView(spinner, new LayoutParams(dp(context, 48), dp(context, 48)));
+
+        loadingText = new TextView(context);
+        loadingText.setText(AppStrings.isEnglish(context) ? "Loading series…" : "Cargando catálogo de series…");
+        loadingText.setTextSize(14);
+        loadingText.setTextColor(0xFF8FA5C2);
+        loadingText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        LayoutParams tlp = new LayoutParams(-2, -2);
+        tlp.topMargin = dp(context, 12);
+        loadingLayout.addView(loadingText, tlp);
+        loadingLayout.setVisibility(GONE);
+        gridContainer.addView(loadingLayout, new FrameLayout.LayoutParams(-1, -1));
+
+        col.addView(gridContainer, new LayoutParams(-1, 0, 1));
 
         return col;
     }
@@ -399,28 +431,45 @@ public final class MediaBrowseView extends LinearLayout {
 
     private void loadData() {
         if (isMovies) {
+            if (loadingLayout != null) loadingLayout.setVisibility(GONE);
+            if (posterGrid != null) posterGrid.setVisibility(VISIBLE);
             fullItems.clear();
-            for (Channel c : repository.getAllChannels()) {
-                if (MediaKind.classify(c) == MediaKind.MOVIE) fullItems.add(c);
-            }
+            fullItems.addAll(repository.getMovieChannels());
+            buildCategoryList();
+            renderCategories();
+            applyFilterAndSort();
         } else {
-            List<Channel> rawSeriesChannels = new ArrayList<>();
-            for (Channel c : repository.getAllChannels()) {
-                if (MediaKind.classify(c) == MediaKind.SERIES) rawSeriesChannels.add(c);
+            List<SeriesItem> cached = repository.peekGroupedSeries();
+            if (cached != null) {
+                if (loadingLayout != null) loadingLayout.setVisibility(GONE);
+                if (posterGrid != null) posterGrid.setVisibility(VISIBLE);
+                fullSeries.clear();
+                fullSeries.addAll(cached);
+                buildCategoryList();
+                renderCategories();
+                applyFilterAndSort();
+            } else {
+                if (loadingLayout != null) loadingLayout.setVisibility(VISIBLE);
+                if (posterGrid != null) posterGrid.setVisibility(GONE);
+                if (catHeaderBadge != null) catHeaderBadge.setText(AppStrings.isEnglish(context) ? "Loading…" : "Cargando…");
+                repository.loadGroupedSeriesAsync(seriesList -> {
+                    if (loadingLayout != null) loadingLayout.setVisibility(GONE);
+                    if (posterGrid != null) posterGrid.setVisibility(VISIBLE);
+                    fullSeries.clear();
+                    fullSeries.addAll(seriesList);
+                    buildCategoryList();
+                    renderCategories();
+                    applyFilterAndSort();
+                    requestFocusFirstItem();
+                });
             }
-            fullSeries.clear();
-            fullSeries.addAll(SeriesParser.groupSeries(rawSeriesChannels));
         }
-
-        buildCategoryList();
-        renderCategories();
-        applyFilterAndSort();
     }
 
     private void buildCategoryList() {
         categories.clear();
         Set<String> favIds = repository.getFavoriteIds();
-        List<String> recents = repository.getRecentIds();
+        Set<String> recentIds = new HashSet<>(repository.getRecentIds());
 
         if (isMovies) {
             // 1. Todas
@@ -433,7 +482,7 @@ public final class MediaBrowseView extends LinearLayout {
 
             // 3. Seguir viendo (Reanudar para ver)
             int resumeCount = 0;
-            for (Channel c : fullItems) if (recents.contains(c.id)) resumeCount++;
+            for (Channel c : fullItems) if (recentIds.contains(c.id)) resumeCount++;
             categories.add(new CategoryItem("resume", AppStrings.isEnglish(context) ? "Keep watching" : "Seguir viendo", "resume", resumeCount));
 
             // Group counts from playlist
@@ -456,12 +505,12 @@ public final class MediaBrowseView extends LinearLayout {
 
             // 2. Favoritos
             int favCount = 0;
-            for (SeriesItem s : fullSeries) if (s.isFavorite(repository)) favCount++;
+            for (SeriesItem s : fullSeries) if (s.isFavorite(favIds)) favCount++;
             categories.add(new CategoryItem("favorites", AppStrings.isEnglish(context) ? "Favorites" : "Favoritos", "star", favCount));
 
             // 3. Seguir viendo
             int resumeCount = 0;
-            for (SeriesItem s : fullSeries) if (s.hasRecent(repository)) resumeCount++;
+            for (SeriesItem s : fullSeries) if (s.hasRecent(recentIds)) resumeCount++;
             categories.add(new CategoryItem("resume", AppStrings.isEnglish(context) ? "Keep watching" : "Seguir viendo", "resume", resumeCount));
 
             // Group counts from playlist
@@ -601,9 +650,11 @@ public final class MediaBrowseView extends LinearLayout {
             }
         } else {
             filteredSeries.clear();
+            Set<String> favIds = repository.getFavoriteIds();
+            Set<String> recentIds = new HashSet<>(repository.getRecentIds());
             for (SeriesItem s : fullSeries) {
-                if ("favorites".equals(selectedCatId) && !s.isFavorite(repository)) continue;
-                if ("resume".equals(selectedCatId) && !s.hasRecent(repository)) continue;
+                if ("favorites".equals(selectedCatId) && !s.isFavorite(favIds)) continue;
+                if ("resume".equals(selectedCatId) && !s.hasRecent(recentIds)) continue;
                 if (selectedCatId.startsWith("group:")) {
                     String groupName = selectedCatId.substring(6);
                     if (!groupName.equalsIgnoreCase(s.group)) continue;
@@ -788,6 +839,23 @@ public final class MediaBrowseView extends LinearLayout {
 
     // ADAPTER & VIEW HOLDER FOR VERTICAL POSTERS (5 or 6 per row)
     private final class PosterAdapter extends RecyclerView.Adapter<PosterHolder> {
+        PosterAdapter() {
+            setHasStableIds(true);
+        }
+
+        @Override public long getItemId(int position) {
+            if (isMovies) {
+                if (position >= 0 && position < filteredItems.size()) {
+                    return filteredItems.get(position).id.hashCode();
+                }
+            } else {
+                if (position >= 0 && position < filteredSeries.size()) {
+                    return filteredSeries.get(position).seriesTitle.hashCode();
+                }
+            }
+            return position;
+        }
+
         @Override public PosterHolder onCreateViewHolder(ViewGroup parent, int viewType) {
             return new PosterHolder();
         }

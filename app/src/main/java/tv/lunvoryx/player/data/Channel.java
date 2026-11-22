@@ -16,6 +16,7 @@ public final class Channel {
     public final String tvgId;
     public final String userAgent;
     public final String referer;
+    private volatile MediaKind cachedKind;
 
     public Channel(String id, String name, String url, String group, String logoUrl,
                    String tvgId, String userAgent, String referer) {
@@ -32,6 +33,13 @@ public final class Channel {
     public static Channel create(String name, String url, String group, String logoUrl,
                                  String tvgId, String userAgent, String referer) {
         return new Channel(stableId(url), name, url, group, logoUrl, tvgId, userAgent, referer);
+    }
+
+    public MediaKind getKind() {
+        if (cachedKind == null) {
+            cachedKind = MediaKind.classify(this);
+        }
+        return cachedKind;
     }
 
     public static String stableId(String value) {

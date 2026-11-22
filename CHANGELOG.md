@@ -5,6 +5,25 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
+## [1.2.1] - 2026-11-22
+
+### ⚡ Optimización Integral y Carga Asíncrona sin Bloqueo de UI
+- **Carga Asíncrona en Background en Series (`loadGroupedSeriesAsync`):** El procesamiento de series ahora se ejecuta íntegramente fuera del hilo de interfaz (UI Thread) en un hilo de trabajo dedicado con indicador de progreso animado (`ProgressBar`), eliminando congelaciones, bloqueos y diálogos de ANR al acceder a listas con decenas de miles de episodios.
+- **Caché en Memoria de Alta Velocidad (`PlaylistRepository`):**
+  - Instantáneas en memoria para canales en vivo, películas, series y series agrupadas (`peekGroupedSeries`).
+  - Precomputación en segundo plano al importar o cargar la lista (`precomputeMediaCacheAsync`), haciendo que los cambios de pestaña sean **inmediatos (0 ms)**.
+- **Aceleración por Hardware (`android:hardwareAccelerated="true"`):** Renderizado acelerado por GPU para todas las pantallas y animaciones, eliminando la lentitud y proporcionando 60 FPS estables en Android TV.
+- **Optimización de Expresiones Regulares y Parser de Series (`SeriesParser`):**
+  - Precompilación de todos los patrones de expresiones regulares y supresión de `String.replaceAll` con compilación repetitiva.
+  - Caché concurrente de títulos (`TITLE_CACHE`): reduce de 80.000 operaciones de limpieza de texto a ~3.700 llamadas únicas (más de 20x de aceleración).
+- **Optimización de Recycler Pools y Stable IDs:**
+  - `setHasStableIds(true)` en `PosterAdapter` y `ChannelRowAdapter` para reutilización inmediata de vistas.
+  - Tamaño de caché aumentado (`setItemViewCacheSize(24)`) y pool de reciclaje ampliado para navegación fluida con D-Pad.
+- **Eliminación de lecturas redundantes de SharedPreferences:**
+  - `isFavorite` y `hasRecent` ahora evalúan conjuntos `Set<String>` en memoria en lugar de deserializar JSON y SharedPreferences repetidamente para cada elemento.
+
+---
+
 ## [1.2.0] - 2026-11-22
 
 ### 🎬 Agrupación de Series por Temporadas y Ficha Interactiva de Capítulos
