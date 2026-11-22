@@ -5,6 +5,26 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
+## [1.1.0] - 2026-11-22
+
+### ✨ Modo Intuitivo (Rediseño Estético y Visual Completo)
+- **Interruptor de Modo Intuitivo en Ajustes:** Nueva opción en la sección General que transforma totalmente la distribución, estética, colores e interactividad del reproductor.
+- **Barra de Navegación Superior (`IntuitiveTopBar`):** Cabecera horizontal completa con logotipo integrado, selector de secciones en cápsulas con acento azul (`#007AFF`) para *Inicio*, *TV en vivo*, *Películas* y *Series*, barra de búsqueda rápida y distintivo de estado/caducidad de lista (*"Tu lista caduca: 06/05/2027"*).
+- **Mosaico Dinámico de Inicio (`IntuitiveHomeScreen`):** Tarjeta panorámica destacada de *TV en vivo* con distintivo `● EN DIRECTO` y fondo de estadio deportivo; columna central con *Películas* y acceso directo a *Recargar lista*; columna derecha con *Series* y acceso directo a *Ajustes*.
+- **Catálogo de Películas y Series en 6 Columnas (`MediaBrowseView`):** Cuadrícula expandida a 6 columnas con carátulas verticales, halo de foco cyan brillante (`#00BFFF`), búsqueda instantánea y ordenación por categoría.
+- **Fichas Cinemáticas de Contenido (`MediaDetailView`):** Al seleccionar cualquier carátula de película o serie se abre una ficha completa con:
+  - Fondo hero cinemático con degradado oscuro de legibilidad y botón de retorno `(←)`.
+  - Título, año, duración o temporadas, género e insignias de calidad *4K* y edad *16+*.
+  - Sinopsis argumental en alta definición.
+  - Botones interactivos de acción: *Reproducir*, *Ver tráiler* (con icono de YouTube) y *+ Mi lista* (favoritos).
+  - **Integración de Tráiler en YouTube:** Apertura automática del tráiler oficial en YouTube en el idioma del reproductor (español por defecto) o búsqueda inteligente mediante intent nativo.
+  - **Reparto y Valoración:** Retratos circulares de actores con puntuación por estrellas (`8,4 / 10` y `8,7 / 10`).
+  - **Selector de Temporadas y Episodios:** Navegación por temporadas (`T1`, `T2`, `T3`) y lista deslizable de episodios con miniatura, descripción, duración y botón de reproducción directa por capítulo.
+  - **Ficha Técnica Detallada:** Información de director, audio multicanal, subtítulos y especificaciones de calidad (*4K UHD · HDR*).
+- **Compatibilidad Total:** El modo clásico con menú lateral estilo Apple tvOS se mantiene intacto y conmutable en cualquier momento desde Ajustes.
+
+---
+
 ## [1.0.1] - 2026-11-22
 
 ### 🚀 Optimización de Importación y Soporte de Listas Masivas

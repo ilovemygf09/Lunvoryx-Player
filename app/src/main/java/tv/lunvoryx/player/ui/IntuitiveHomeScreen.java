@@ -116,7 +116,7 @@ public final class IntuitiveHomeScreen extends LinearLayout {
 
         // Footer at bottom
         TextView footer = new TextView(context);
-        footer.setText("Lunvoryx Player · v1.0.1");
+        footer.setText("Lunvoryx Player · v1.1.0");
         footer.setTextSize(11.5f);
         footer.setTextColor(0xFF6A7B95);
         LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(-2, -2);
