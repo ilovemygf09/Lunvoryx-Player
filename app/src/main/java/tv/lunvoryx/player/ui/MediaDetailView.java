@@ -9,8 +9,6 @@ import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
-import android.os.Handler;
-import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -26,8 +24,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import tv.lunvoryx.player.R;
 import tv.lunvoryx.player.data.Channel;
 import tv.lunvoryx.player.data.EpisodeItem;
@@ -53,10 +49,11 @@ public final class MediaDetailView extends FrameLayout {
     private final boolean isMovie;
     private final PlaylistRepository repository;
     private final Listener listener;
-    private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final Handler main = new Handler(Looper.getMainLooper());
+    private final PreviewMetadata metadata = new PreviewMetadata();
+    private TextView castText, ratingText;
 
-    private ImageView backdropImg;
+    private ImageView backdropImg, trailerThumb;
+    private LinearLayout portraits, detailRows;
     private TextView titleView;
     private TextView metaView;
     private TextView synopsisView;
@@ -99,7 +96,6 @@ public final class MediaDetailView extends FrameLayout {
         this.isFavorite = seriesItem != null ? seriesItem.isFavorite(repository) : (channel != null && repository.isFavorite(channel.id));
         extractBasicMetadata();
         init();
-        loadMetadata();
     }
 
     private void extractBasicMetadata() {
@@ -109,7 +105,7 @@ public final class MediaDetailView extends FrameLayout {
             return;
         }
         cleanTitle = channel != null ? channel.name : "Título";
-        cleanYear = "2026";
+        cleanYear = "";
         if (channel != null) {
             java.util.regex.Matcher m = java.util.regex.Pattern.compile("(19\\d\\d|20\\d\\d)").matcher(channel.name);
             if (m.find()) {
@@ -129,14 +125,14 @@ public final class MediaDetailView extends FrameLayout {
         // 1. High-res Backdrop
         backdropImg = new ImageView(context);
         backdropImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        backdropImg.setImageBitmap(Artwork.get(context, isMovie ? R.drawable.category_movies : R.drawable.category_series, 1280));
+        backdropImg.setImageBitmap(Artwork.get(context, isMovie ? R.drawable.intu_movie_scene : R.drawable.intu_series_scene, 1280));
         addView(backdropImg, new LayoutParams(-1, dp(context, 380)));
 
         // Vignette Gradients: Darken from bottom and left for text legibility
         View shade = new View(context);
         shade.setBackground(new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x33060A14, 0xAA060A14, 0xFF060A14}
+                new int[]{0x00060A14, 0x33060A14, 0xFF060A14}
         ));
         addView(shade, new LayoutParams(-1, dp(context, 385)));
 
@@ -181,7 +177,7 @@ public final class MediaDetailView extends FrameLayout {
         // Hero Info: Title
         titleView = new TextView(context);
         titleView.setText(cleanTitle);
-        titleView.setTextSize(36);
+        titleView.setTextSize(40);
         titleView.setTextColor(0xFFFFFFFF);
         titleView.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2);
@@ -190,11 +186,7 @@ public final class MediaDetailView extends FrameLayout {
 
         // Metadata row (Year, duration/seasons, genre, badges)
         metaView = new TextView(context);
-        String group = seriesItem != null ? seriesItem.group : (channel != null ? channel.group : "");
-        int seasonsCount = seriesItem != null ? seriesItem.getSeasonCount() : 3;
-        String metaText = isMovie ? (cleanYear + " · 2 h 08 min · " + (group.isEmpty() ? "Película" : group))
-                : (cleanYear + " · " + seasonsCount + (seasonsCount == 1 ? " temporada" : " temporadas") + " · " + (group.isEmpty() ? "Serie dramática" : group));
-        metaView.setText(metaText);
+        updateMetaLine();
         metaView.setTextSize(13.5f);
         metaView.setTextColor(0xFF9AACBE);
         metaView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -204,16 +196,7 @@ public final class MediaDetailView extends FrameLayout {
         metaRow.setGravity(Gravity.CENTER_VERTICAL);
         metaRow.addView(metaView);
 
-        // Badges: 4K, 16+
-        TextView b4k = buildBadge("4K");
-        LinearLayout.LayoutParams b4kp = new LinearLayout.LayoutParams(-2, -2);
-        b4kp.leftMargin = dp(context, 12);
-        metaRow.addView(b4k, b4kp);
 
-        TextView bAge = buildBadge("16+");
-        LinearLayout.LayoutParams bAp = new LinearLayout.LayoutParams(-2, -2);
-        bAp.leftMargin = dp(context, 6);
-        metaRow.addView(bAge, bAp);
 
         LinearLayout.LayoutParams mrp = new LinearLayout.LayoutParams(-1, -2);
         mrp.topMargin = dp(context, 6);
@@ -221,15 +204,13 @@ public final class MediaDetailView extends FrameLayout {
 
         // Synopsis
         synopsisView = new TextView(context);
-        synopsisView.setText(isMovie ?
-                "Una emocionante producción cinematográfica con una historia que desafía la realidad y sumerge al espectador en una experiencia única llena de tensión y aventuras visualmente asombrosas."
-                : "Una cautivadora serie que explora secretos ocultos, giros inesperados y la intriga constante de sus personajes mientras sus destinos se entrelazan capítulo a capítulo.");
+        synopsisView.setText("Sinopsis no disponible");
         synopsisView.setTextSize(13.5f);
         synopsisView.setTextColor(0xFFBAC7D5);
         synopsisView.setLineSpacing(dp(context, 4), 1.0f);
         synopsisView.setMaxLines(3);
         synopsisView.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(context, 680), -2);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(context, 440), -2);
         sp.topMargin = dp(context, 12);
         body.addView(synopsisView, sp);
 
@@ -297,22 +278,22 @@ public final class MediaDetailView extends FrameLayout {
         bottomCards.addView(middleCard, mcp);
 
         // Card 3: Detalles / Reparto y valoración (30% width)
-        detailsCard = isMovie ? buildDetailsCard() : buildSeriesDetailsCard();
+        detailsCard = isMovie ? buildDetailsCard() : buildCastCard();
         LinearLayout.LayoutParams dcp = new LinearLayout.LayoutParams(0, -1, 0.30f);
         bottomCards.addView(detailsCard, dcp);
 
         btnPlay.requestFocus();
     }
 
-    private TextView buildBadge(String label) {
-        TextView b = new TextView(context);
-        b.setText(label);
-        b.setTextSize(10.5f);
-        b.setTextColor(0xFFD4E0EE);
-        b.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        b.setBackground(TvStyle.squircleCard(context, 6));
-        b.setPadding(dp(context, 6), dp(context, 2), dp(context, 6), dp(context, 2));
-        return b;
+    private void updateMetaLine() {
+        List<String> values = new java.util.ArrayList<>();
+        if (!cleanYear.isEmpty()) values.add(cleanYear);
+        if (seriesItem != null) {
+            int seasons = seriesItem.getSeasonCount();
+            values.add(seasons + (seasons == 1 ? " temporada" : " temporadas"));
+        }
+        if (channel != null && !channel.group.isEmpty()) values.add(channel.group);
+        metaView.setText(TextUtils.join(" · ", values));
     }
 
     private TextView buildActionButton(String label, String iconKind, boolean isPrimary) {
@@ -359,8 +340,8 @@ public final class MediaDetailView extends FrameLayout {
         card.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
         TextView title = new TextView(context);
-        title.setText("Tráiler oficial · Español");
-        title.setTextSize(13);
+        title.setText("Tráiler en YouTube");
+        title.setTextSize(16);
         title.setTextColor(0xFFFFFFFF);
         title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         content.addView(title);
@@ -369,9 +350,9 @@ public final class MediaDetailView extends FrameLayout {
         preview.setBackground(TvStyle.squircleCard(context, 12));
         preview.setClipToOutline(true);
 
-        ImageView thumb = new ImageView(context);
+        ImageView thumb = trailerThumb = new ImageView(context);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        thumb.setImageBitmap(Artwork.get(context, isMovie ? R.drawable.category_movies : R.drawable.category_series, 500));
+        thumb.setImageBitmap(Artwork.get(context, isMovie ? R.drawable.intu_movie_scene : R.drawable.intu_series_scene, 500));
         preview.addView(thumb, new FrameLayout.LayoutParams(-1, -1));
 
         // Dark gradient
@@ -433,7 +414,7 @@ public final class MediaDetailView extends FrameLayout {
 
     private FrameLayout buildCastCard() {
         FrameLayout card = new FrameLayout(context);
-        card.setBackground(TvStyle.squircleCard(context, 16));
+        card.setBackground(IntuitivePanel.create(context));
         card.setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
 
         LinearLayout content = new LinearLayout(context);
@@ -442,83 +423,27 @@ public final class MediaDetailView extends FrameLayout {
 
         TextView title = new TextView(context);
         title.setText("Reparto");
-        title.setTextSize(13);
+        title.setTextSize(16);
         title.setTextColor(0xFFFFFFFF);
         title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         content.addView(title);
 
-        LinearLayout castRow = new LinearLayout(context);
-        castRow.setOrientation(LinearLayout.HORIZONTAL);
-        castRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams crp = new LinearLayout.LayoutParams(-1, 0, 1.0f);
-        crp.topMargin = dp(context, 8);
-        content.addView(castRow, crp);
-
-        String[] sampleNames = {"Adrián Velasco", "Elena Morales", "Mateo Rivas", "Laura Serrano", "Álex Duarte"};
-        for (int i = 0; i < sampleNames.length; i++) {
-            LinearLayout actorCol = new LinearLayout(context);
-            actorCol.setOrientation(LinearLayout.VERTICAL);
-            actorCol.setGravity(Gravity.CENTER_HORIZONTAL);
-
-            FrameLayout avatar = new FrameLayout(context);
-            avatar.setBackground(TvStyle.squircleSolid(context, 24, 0xFF1B2640));
-            LineIcon person = new LineIcon(context, "user");
-            person.setColor(0xFF8FA5C2);
-            avatar.addView(person, new FrameLayout.LayoutParams(dp(context, 24), dp(context, 24), Gravity.CENTER));
-            actorCol.addView(avatar, new LinearLayout.LayoutParams(dp(context, 48), dp(context, 48)));
-
-            TextView name = new TextView(context);
-            name.setText(sampleNames[i]);
-            name.setTextSize(10.5f);
-            name.setTextColor(0xFFCBD6E2);
-            name.setGravity(Gravity.CENTER_HORIZONTAL);
-            name.setMaxLines(2);
-            LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(dp(context, 68), -2);
-            np.topMargin = dp(context, 4);
-            actorCol.addView(name, np);
-
-            LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(0, -2, 1.0f);
-            castRow.addView(actorCol, ap);
-        }
-
-        LinearLayout ratingRow = new LinearLayout(context);
-        ratingRow.setOrientation(LinearLayout.HORIZONTAL);
-        ratingRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams rrp = new LinearLayout.LayoutParams(-1, -2);
-        rrp.topMargin = dp(context, 8);
-        content.addView(ratingRow, rrp);
-
-        TextView valLabel = new TextView(context);
-        valLabel.setText("Valoración");
-        valLabel.setTextSize(12.5f);
-        valLabel.setTextColor(0xFFFFFFFF);
-        valLabel.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        ratingRow.addView(valLabel);
-
-        TextView stars = new TextView(context);
-        stars.setText("  ★★★★☆");
-        stars.setTextColor(0xFFFFB800);
-        stars.setTextSize(14);
-        ratingRow.addView(stars);
-
-        View rSpacer = new View(context);
-        ratingRow.addView(rSpacer, new LinearLayout.LayoutParams(0, 1, 1.0f));
-
-        TextView scoreBadge = new TextView(context);
-        scoreBadge.setText("8,4 / 10");
-        scoreBadge.setTextSize(12);
-        scoreBadge.setTextColor(0xFFFFFFFF);
-        scoreBadge.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        scoreBadge.setBackground(TvStyle.squircleCard(context, 8));
-        scoreBadge.setPadding(dp(context, 10), dp(context, 4), dp(context, 10), dp(context, 4));
-        ratingRow.addView(scoreBadge);
+        portraits = new LinearLayout(context);
+        content.addView(portraits);
+        castText = new TextView(context);
+        castText.setTextColor(0xFFBAC7D5);
+        castText.setText("Reparto no disponible");
+        content.addView(castText);
+        ratingText = new TextView(context);
+        ratingText.setTextColor(0xFFFFFFFF);
+        content.addView(ratingText);
 
         return card;
     }
 
     private FrameLayout buildEpisodesCard() {
         FrameLayout card = new FrameLayout(context);
-        card.setBackground(TvStyle.squircleCard(context, 16));
+        card.setBackground(IntuitivePanel.create(context));
         card.setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
 
         LinearLayout content = new LinearLayout(context);
@@ -532,7 +457,7 @@ public final class MediaDetailView extends FrameLayout {
 
         TextView title = new TextView(context);
         title.setText("Temporadas y episodios");
-        title.setTextSize(13);
+        title.setTextSize(16);
         title.setTextColor(0xFFFFFFFF);
         title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         header.addView(title);
@@ -553,7 +478,10 @@ public final class MediaDetailView extends FrameLayout {
         seasonsPillsRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-1, -2);
         plp.topMargin = dp(context, 8);
-        content.addView(seasonsPillsRow, plp);
+        android.widget.HorizontalScrollView seasonsScroll = new android.widget.HorizontalScrollView(context);
+        seasonsScroll.setHorizontalScrollBarEnabled(false);
+        seasonsScroll.addView(seasonsPillsRow);
+        content.addView(seasonsScroll, plp);
 
         // Episodes Scroll List
         ScrollView epScroller = new ScrollView(context);
@@ -566,9 +494,8 @@ public final class MediaDetailView extends FrameLayout {
         elp.topMargin = dp(context, 6);
         content.addView(epScroller, elp);
 
-        List<Integer> seasons = seriesItem != null ? seriesItem.getSeasons() : Arrays.asList(1, 2, 3);
-        if (seasons.isEmpty()) seasons = Collections.singletonList(1);
-        activeSeason = seasons.get(0);
+        List<Integer> seasons = seriesItem == null ? Collections.emptyList() : seriesItem.getSeasons();
+        if (!seasons.isEmpty()) activeSeason = seasons.get(0);
 
         renderSeasonPills(seasons);
         renderEpisodesForSeason(activeSeason);
@@ -592,21 +519,28 @@ public final class MediaDetailView extends FrameLayout {
 
             sp.setOnClickListener(v -> {
                 activeSeason = sNum;
-                renderSeasonPills(seasons);
+                updateSeasonPillStyles(seasons);
                 renderEpisodesForSeason(activeSeason);
             });
 
             sp.setOnFocusChangeListener((v, f) -> {
-                applySeasonPillStyle(sp, sNum == activeSeason, f);
                 if (f) {
                     activeSeason = sNum;
                     renderEpisodesForSeason(activeSeason);
                 }
+                updateSeasonPillStyles(seasons);
             });
 
             LinearLayout.LayoutParams spp = new LinearLayout.LayoutParams(-2, -2);
             if (i > 0) spp.leftMargin = dp(context, 8);
             seasonsPillsRow.addView(sp, spp);
+        }
+    }
+
+    private void updateSeasonPillStyles(List<Integer> seasons) {
+        for (int i = 0; i < seasonsPillsRow.getChildCount(); i++) {
+            TextView pill = (TextView) seasonsPillsRow.getChildAt(i);
+            applySeasonPillStyle(pill, seasons.get(i) == activeSeason, pill.hasFocus());
         }
     }
 
@@ -627,17 +561,7 @@ public final class MediaDetailView extends FrameLayout {
         List<EpisodeItem> list = seriesItem != null ? seriesItem.getEpisodesForSeason(seasonNum) : null;
 
         if (list == null || list.isEmpty()) {
-            // Fallback sample episodes if no real list available
-            String[][] sampleEps = {
-                    {"Episodio 1 · La señal", "Una pista inesperada reabre el caso.", "48 min"},
-                    {"Episodio 2 · Bajo la niebla", "El pasado del pueblo empieza a salir a la luz.", "51 min"},
-                    {"Episodio 3 · Lo que escondemos", "Un hallazgo lo cambia todo.", "49 min"}
-            };
-            episodesCountView.setText(sampleEps.length + " episodios");
-            for (String[] sep : sampleEps) {
-                View row = buildEpisodeRow(sep[0], sep[1], sep[2], null, null);
-                epListContainer.addView(row);
-            }
+            episodesCountView.setText("Sin episodios en la lista");
             return;
         }
 
@@ -667,7 +591,7 @@ public final class MediaDetailView extends FrameLayout {
         } else if (seriesItem != null && !seriesItem.logoUrl.isEmpty()) {
             LogoLoader.load(seriesItem.logoUrl, iv);
         } else {
-            iv.setImageBitmap(Artwork.get(context, R.drawable.category_series, 200));
+            iv.setImageBitmap(Artwork.get(context, R.drawable.intu_series_scene, 320));
         }
         epThumb.addView(iv, new FrameLayout.LayoutParams(-1, -1));
         row.addView(epThumb, new LinearLayout.LayoutParams(dp(context, 64), dp(context, 36)));
@@ -732,7 +656,7 @@ public final class MediaDetailView extends FrameLayout {
 
     private FrameLayout buildDetailsCard() {
         FrameLayout card = new FrameLayout(context);
-        card.setBackground(TvStyle.squircleCard(context, 16));
+        card.setBackground(IntuitivePanel.create(context));
         card.setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
 
         LinearLayout content = new LinearLayout(context);
@@ -741,115 +665,33 @@ public final class MediaDetailView extends FrameLayout {
 
         TextView title = new TextView(context);
         title.setText("Detalles");
-        title.setTextSize(13);
+        title.setTextSize(16);
         title.setTextColor(0xFFFFFFFF);
         title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         content.addView(title);
 
-        LinearLayout list = new LinearLayout(context);
+        LinearLayout list = detailRows = new LinearLayout(context);
         list.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.topMargin = dp(context, 8);
         content.addView(list, lp);
 
-        addDetailItem(list, "director", "Director:", "Diego Navarro");
-        addDetailItem(list, "calendar", "Año:", cleanYear);
-        addDetailItem(list, "history", "Duración:", "2 h 08 min");
-        addDetailItem(list, "globe", "Idioma:", "Español");
-        addDetailItem(list, "subtitles", "Subtítulos:", "Español, Inglés");
-        addDetailItem(list, "player", "Calidad:", "4K UHD · HDR");
+        fillDetailRows();
 
         return card;
     }
 
-    private FrameLayout buildSeriesDetailsCard() {
-        FrameLayout card = new FrameLayout(context);
-        card.setBackground(TvStyle.squircleCard(context, 16));
-        card.setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
-
-        LinearLayout content = new LinearLayout(context);
-        content.setOrientation(LinearLayout.VERTICAL);
-        card.addView(content, new FrameLayout.LayoutParams(-1, -1));
-
-        TextView title = new TextView(context);
-        title.setText("Reparto y valoración");
-        title.setTextSize(13);
-        title.setTextColor(0xFFFFFFFF);
-        title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        content.addView(title);
-
-        // Actors row
-        LinearLayout castRow = new LinearLayout(context);
-        castRow.setOrientation(LinearLayout.HORIZONTAL);
-        castRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams crp = new LinearLayout.LayoutParams(-1, -2);
-        crp.topMargin = dp(context, 8);
-        content.addView(castRow, crp);
-
-        String[] actors = {"Lucía Vergara", "Diego Salvatierra", "Marina Rojas", "Héctor Navarro"};
-        for (String act : actors) {
-            LinearLayout col = new LinearLayout(context);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.setGravity(Gravity.CENTER_HORIZONTAL);
-
-            FrameLayout av = new FrameLayout(context);
-            av.setBackground(TvStyle.squircleSolid(context, 20, 0xFF1B2640));
-            LineIcon u = new LineIcon(context, "user");
-            u.setColor(0xFF8FA5C2);
-            av.addView(u, new FrameLayout.LayoutParams(dp(context, 20), dp(context, 20), Gravity.CENTER));
-            col.addView(av, new LinearLayout.LayoutParams(dp(context, 40), dp(context, 40)));
-
-            TextView tn = new TextView(context);
-            tn.setText(act);
-            tn.setTextSize(9.5f);
-            tn.setTextColor(0xFFCBD6E2);
-            tn.setMaxLines(2);
-            tn.setGravity(Gravity.CENTER_HORIZONTAL);
-            LinearLayout.LayoutParams tnp = new LinearLayout.LayoutParams(dp(context, 58), -2);
-            tnp.topMargin = dp(context, 3);
-            col.addView(tn, tnp);
-
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -2, 1.0f);
-            castRow.addView(col, cp);
-        }
-
-        // Rating
-        LinearLayout ratingRow = new LinearLayout(context);
-        ratingRow.setOrientation(LinearLayout.HORIZONTAL);
-        ratingRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams rrp = new LinearLayout.LayoutParams(-1, -2);
-        rrp.topMargin = dp(context, 8);
-        content.addView(ratingRow, rrp);
-
-        TextView val = new TextView(context);
-        val.setText("Valoración  ★★★★★");
-        val.setTextSize(11.5f);
-        val.setTextColor(0xFFFFB800);
-        ratingRow.addView(val);
-
-        View sp = new View(context);
-        ratingRow.addView(sp, new LinearLayout.LayoutParams(0, 1, 1.0f));
-
-        TextView score = new TextView(context);
-        score.setText("8,7 / 10");
-        score.setTextSize(11);
-        score.setTextColor(0xFFFFFFFF);
-        score.setBackground(TvStyle.squircleCard(context, 6));
-        score.setPadding(dp(context, 8), dp(context, 2), dp(context, 8), dp(context, 2));
-        ratingRow.addView(score);
-
-        // Tech specs
-        LinearLayout specs = new LinearLayout(context);
-        specs.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams spp = new LinearLayout.LayoutParams(-1, -2);
-        spp.topMargin = dp(context, 6);
-        content.addView(specs, spp);
-
-        addDetailItem(specs, "audio", "Audio:", "Español / Original");
-        addDetailItem(specs, "subtitles", "Subtítulos:", "Español, Inglés");
-        addDetailItem(specs, "player", "Calidad:", "4K HDR");
-
-        return card;
+    private void fillDetailRows() {
+        if (detailRows == null) return;
+        detailRows.removeAllViews();
+        if (details != null && !TextUtils.isEmpty(details.director))
+            addDetailItem(detailRows, "movie", "Dirección:", details.director);
+        if (!cleanYear.isEmpty()) addDetailItem(detailRows, "calendar", "Año:", cleanYear);
+        if (details != null && details.runtime > 0)
+            addDetailItem(detailRows, "clock", "Duración:", details.runtime + " min");
+        if (details != null && !TextUtils.isEmpty(details.language))
+            addDetailItem(detailRows, "audio", "Idioma original:", new Locale(details.language).getDisplayLanguage());
+        if (channel != null) addDetailItem(detailRows, "folder", "Grupo:", channel.group);
     }
 
     private void addDetailItem(LinearLayout parent, String iconKind, String label, String value) {
@@ -900,36 +742,60 @@ public final class MediaDetailView extends FrameLayout {
         }
     }
 
-    private void loadMetadata() {
-        io.execute(() -> {
-            String lang = AppStrings.getLang(context);
-            TmdbClient.Details d = TmdbClient.searchAndGetDetails(context, cleanTitle, isMovie, lang);
-            if (d != null) {
-                main.post(() -> {
-                    details = d;
-                    if (d.overview != null && !d.overview.isEmpty()) {
-                        synopsisView.setText(d.overview);
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        String logo = seriesItem != null ? seriesItem.logoUrl : channel != null ? channel.logoUrl : "";
+        if (!logo.isEmpty()) LogoLoader.load(logo, backdropImg);
+        metadata.load(context, cleanTitle, isMovie, d -> {
+            details = d;
+            if (!TextUtils.isEmpty(d.title)) titleView.setText(d.title);
+            if (!TextUtils.isEmpty(d.overview)) synopsisView.setText(d.overview);
+            if (!d.cast.isEmpty()) {
+                castText.setVisibility(GONE);
+                portraits.removeAllViews();
+                int count = Math.min(isMovie ? 5 : 4, d.cast.size());
+                for (int i = 0; i < count; i++) {
+                    LinearLayout person = new LinearLayout(context);
+                    person.setOrientation(LinearLayout.VERTICAL);
+                    person.setGravity(Gravity.CENTER_HORIZONTAL);
+                    portraits.addView(person, new LinearLayout.LayoutParams(0, -2, 1));
+                    ImageView photo = new ImageView(context);
+                    GradientDrawable circle = new GradientDrawable();
+                    circle.setShape(GradientDrawable.OVAL);
+                    circle.setColor(0xFF172C46);
+                    photo.setBackground(circle);
+                    photo.setClipToOutline(true);
+                    photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    int size = dp(context, isMovie ? 44 : 36);
+                    if (i < d.castPhotos.size() && !d.castPhotos.get(i).isEmpty()) {
+                        person.addView(photo, new LinearLayout.LayoutParams(size, size));
+                        LogoLoader.load(d.castPhotos.get(i), photo);
                     }
-                    if (d.title != null && !d.title.isEmpty()) {
-                        titleView.setText(d.title);
-                    }
-                    if (d.releaseDate != null && d.releaseDate.length() >= 4) {
-                        cleanYear = d.releaseDate.substring(0, 4);
-                        String grp = seriesItem != null ? seriesItem.group : (channel != null ? channel.group : "");
-                        int sc = seriesItem != null ? seriesItem.getSeasonCount() : 3;
-                        metaView.setText(cleanYear + (isMovie ? " · 2 h 08 min · " : (" · " + sc + (sc == 1 ? " temporada · " : " temporadas · "))) + grp);
-                    }
-                    if (d.backdropUrl != null && !d.backdropUrl.isEmpty()) {
-                        LogoLoader.load(d.backdropUrl, backdropImg);
-                    }
-                });
-            } else {
-                String fallbackLogo = seriesItem != null && !seriesItem.logoUrl.isEmpty() ? seriesItem.logoUrl
-                        : (channel != null && !channel.logoUrl.isEmpty() ? channel.logoUrl : "");
-                if (!fallbackLogo.isEmpty()) {
-                    main.post(() -> LogoLoader.load(fallbackLogo, backdropImg));
+                    TextView name = new TextView(context);
+                    name.setText(d.cast.get(i).split(" \\(", 2)[0]);
+                    name.setTextSize(11);
+                    name.setGravity(Gravity.CENTER);
+                    name.setTextColor(0xFFF2F6FF);
+                    person.addView(name);
                 }
             }
+            if (d.rating > 0) ratingText.setText(String.format(java.util.Locale.getDefault(), "★  %.1f / 10", d.rating));
+            if (d.releaseDate != null && d.releaseDate.length() >= 4) {
+                cleanYear = d.releaseDate.substring(0, 4);
+                updateMetaLine();
+            }
+            fillDetailRows();
+            if (!TextUtils.isEmpty(d.backdropUrl)) {
+                LogoLoader.load(d.backdropUrl, backdropImg, 1280);
+                LogoLoader.load(d.backdropUrl, trailerThumb, 512);
+            }
         });
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        metadata.cancel();
+        LogoLoader.clear(backdropImg);
+        LogoLoader.clear(trailerThumb);
+        super.onDetachedFromWindow();
     }
 }

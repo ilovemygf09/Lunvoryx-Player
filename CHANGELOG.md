@@ -5,6 +5,14 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
+## [1.2.2] - 2026-11-23
+
+- Rediseño completo del modo Intuitivo para Android TV con navegación superior y mosaico visual.
+- Catálogos de películas y series con carátulas locales, seis columnas, búsqueda y foco D-Pad.
+- Vista de TV en vivo con tres columnas, emblemas de canales y previsualización silenciada.
+- Fichas cinematográficas con temporadas, episodios, reparto y caché de imágenes por resolución.
+- Lista de demostración reproducible con clips locales incluidos en el APK.
+
 ## [1.2.1] - 2026-11-22
 
 ### ⚡ Optimización Integral y Carga Asíncrona sin Bloqueo de UI

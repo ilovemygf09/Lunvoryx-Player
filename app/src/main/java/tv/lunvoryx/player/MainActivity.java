@@ -396,11 +396,7 @@ public final class MainActivity extends Activity {
                             () -> { section = "Inicio"; render(); });
                 }
                 public void play(List<Channel> queue, int index) {
-                    Channel c = queue.get(index);
-                    lastFocusedId = c.id;
-                    work(AppStrings.isEnglish(MainActivity.this) ? "Opening content…" : "Abriendo contenido…",
-                            () -> repository.recordPlayed(c.id),
-                            () -> PlayerActivity.start(MainActivity.this, queue, index));
+                    openPlayer(queue.get(index), queue, index);
                 }
             }), new LinearLayout.LayoutParams(-1, -1));
 
@@ -475,10 +471,7 @@ public final class MainActivity extends Activity {
         content.setPadding(0, 0, 0, 0);
         LiveTvBrowseView browseView = new LiveTvBrowseView(this, repository, new LiveTvBrowseView.Listener() {
             @Override public void onPlay(Channel channel, List<Channel> list, int index) {
-                lastFocusedId = channel.id;
-                work(AppStrings.isEnglish(MainActivity.this) ? "Opening channel…" : "Abriendo canal…",
-                        () -> repository.recordPlayed(channel.id),
-                        () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(list), Math.max(0, index)));
+                openPlayer(channel, list, index);
             }
             @Override public void onToggleFavorite(Channel channel) {
                 repository.toggleFavorite(channel.id);
@@ -496,10 +489,7 @@ public final class MainActivity extends Activity {
                 if (isIntuitive) {
                     showMediaDetails(channel, isMovies, list, index);
                 } else {
-                    lastFocusedId = channel.id;
-                    work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
-                            () -> repository.recordPlayed(channel.id),
-                            () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(list), Math.max(0, index)));
+                    openPlayer(channel, list, index);
                 }
             }
             @Override public void onOpenDetails(Channel channel, List<Channel> list, int index) {
@@ -528,10 +518,7 @@ public final class MainActivity extends Activity {
         }
         currentDetailView = new MediaDetailView(this, series, repository, new MediaDetailView.Listener() {
             @Override public void onPlay(Channel c) {
-                lastFocusedId = c.id;
-                work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
-                        () -> repository.recordPlayed(c.id),
-                        () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(series.allEpisodeChannels), Math.max(0, series.allEpisodeChannels.indexOf(c))));
+                openPlayer(c, series.allEpisodeChannels, series.allEpisodeChannels.indexOf(c));
             }
             @Override public void onToggleFavorite(Channel c) {
                 repository.toggleFavorite(c.id);
@@ -551,10 +538,7 @@ public final class MainActivity extends Activity {
         }
         currentDetailView = new MediaDetailView(this, channel, isMovies, repository, new MediaDetailView.Listener() {
             @Override public void onPlay(Channel c) {
-                lastFocusedId = c.id;
-                work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
-                        () -> repository.recordPlayed(c.id),
-                        () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(list), Math.max(0, index)));
+                openPlayer(c, list, index);
             }
             @Override public void onToggleFavorite(Channel c) {
                 repository.toggleFavorite(c.id);
@@ -581,10 +565,7 @@ public final class MainActivity extends Activity {
         content.setPadding(0, 0, 0, 0);
         SearchViewLayout searchView = new SearchViewLayout(this, repository, new SearchViewLayout.Listener() {
             @Override public void onPlay(Channel channel, List<Channel> list, int index) {
-                lastFocusedId = channel.id;
-                work(AppStrings.isEnglish(MainActivity.this) ? "Opening…" : "Abriendo…",
-                        () -> repository.recordPlayed(channel.id),
-                        () -> PlayerActivity.start(MainActivity.this, new ArrayList<>(list), Math.max(0, index)));
+                openPlayer(channel, list, index);
             }
             @Override public void onToggleFavorite(Channel channel) {
                 repository.toggleFavorite(channel.id);
@@ -804,12 +785,13 @@ public final class MainActivity extends Activity {
     }
 
     private void play(Channel c) {
-        lastFocusedId = c.id;
-        final ArrayList<Channel> queue = new ArrayList<>(shown);
-        final int index = queue.indexOf(c);
-        work(AppStrings.isEnglish(this) ? "Opening channel…" : "Abriendo canal…",
-                () -> repository.recordPlayed(c.id),
-                () -> PlayerActivity.start(this, queue, Math.max(0, index)));
+        openPlayer(c, shown, shown.indexOf(c));
+    }
+
+    private void openPlayer(Channel channel, List<Channel> queue, int index) {
+        if (!operationAvailable()) return;
+        lastFocusedId = channel.id;
+        PlayerActivity.start(this, queue, index);
     }
 
     private void toggleFavorite(Channel c) {

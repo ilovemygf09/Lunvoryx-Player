@@ -3,8 +3,6 @@ package tv.lunvoryx.player.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.AtomicFile;
 
 import org.json.JSONArray;
@@ -43,18 +41,54 @@ public final class PlaylistRepository {
     private final Context context;
     private final SharedPreferences preferences;
     private final AtomicFile storage;
-    // Readers use immutable snapshots and never wait behind a download or disk write.
-    private volatile List<Playlist> playlists = Collections.emptyList();
     private boolean loaded;
+    private static final ExecutorService MEDIA_WORKER = Executors.newSingleThreadExecutor();
+    private volatile Catalog catalog = new Catalog(Collections.emptyList());
 
-    // Media snapshot caches
-    private volatile List<Channel> cachedAllChannels;
-    private volatile List<Channel> cachedLiveChannels;
-    private volatile List<Channel> cachedMovieChannels;
-    private volatile List<Channel> cachedSeriesChannels;
-    private volatile List<SeriesItem> cachedGroupedSeries;
-    private final Object mediaCacheLock = new Object();
-    private final ExecutorService mediaCacheExecutor = Executors.newSingleThreadExecutor();
+    // Publish all lookup structures together, so readers can finish with their existing snapshot.
+    private static final class Catalog {
+        final List<Playlist> playlists;
+        final Map<String, Channel> byId = new LinkedHashMap<>();
+        final List<Channel> all;
+        List<Channel> live, movies, episodes;
+        private List<SeriesItem> series;
+
+        Catalog(List<Playlist> playlists) {
+            this.playlists = Collections.unmodifiableList(playlists);
+            for (Playlist playlist : playlists) {
+                for (Channel channel : playlist.channels) {
+                    if (!byId.containsKey(channel.id)) byId.put(channel.id, channel);
+                }
+            }
+            all = Collections.unmodifiableList(new ArrayList<>(byId.values()));
+        }
+
+        synchronized void classify() {
+            if (live != null) return;
+            List<Channel> liveItems = new ArrayList<>(), movieItems = new ArrayList<>(), seriesItems = new ArrayList<>();
+            for (Channel channel : all) {
+                switch (channel.getKind()) {
+                    case LIVE: liveItems.add(channel); break;
+                    case MOVIE: movieItems.add(channel); break;
+                    case SERIES: seriesItems.add(channel); break;
+                }
+            }
+            live = Collections.unmodifiableList(liveItems);
+            movies = Collections.unmodifiableList(movieItems);
+            episodes = Collections.unmodifiableList(seriesItems);
+        }
+
+        private final Object seriesLock = new Object();
+        List<SeriesItem> groupedSeries() {
+            synchronized (seriesLock) {
+                if (series == null) {
+                    classify();
+                    series = Collections.unmodifiableList(SeriesParser.groupSeries(episodes));
+                }
+                return series;
+            }
+        }
+    }
 
     public PlaylistRepository(Context context) {
         this.context = context.getApplicationContext();
@@ -75,6 +109,8 @@ public final class PlaylistRepository {
                 if (channelArray != null) for (int j = 0; j < channelArray.length(); j++) {
                     JSONObject c = channelArray.getJSONObject(j);
                     String url = c.optString("url");
+                    if (DEMO_ID.equals(item.optString("id")) && url.startsWith("https://test-streams.mux.dev/"))
+                        url = demoUrl(url.substring("https://test-streams.mux.dev/".length()), c.optString("id"));
                     if (!url.isEmpty()) channels.add(new Channel(c.optString("id"), c.optString("name"), url,
                             c.optString("group"), c.optString("logo"), c.optString("tvgId"),
                             c.optString("userAgent"), c.optString("referer")));
@@ -87,138 +123,52 @@ public final class PlaylistRepository {
         } catch (JSONException damaged) {
             throw new IOException("No se ha podido leer la biblioteca guardada.");
         }
-        playlists = Collections.unmodifiableList(restored);
+        catalog = new Catalog(restored);
         loaded = true;
         if (restored.isEmpty() || (restored.size() == 1 && DEMO_ID.equals(restored.get(0).id) && restored.get(0).channels.size() <= 3)) {
             try {
                 addDemoPlaylist();
+                return getPlaylists();
             } catch (Exception ignored) {}
         }
-        invalidateMediaCache();
         precomputeMediaCacheAsync();
         return getPlaylists();
     }
 
     public List<Playlist> getPlaylists() {
-        return playlists;
+        return catalog.playlists;
     }
 
-    public void invalidateMediaCache() {
-        synchronized (mediaCacheLock) {
-            cachedAllChannels = null;
-            cachedLiveChannels = null;
-            cachedMovieChannels = null;
-            cachedSeriesChannels = null;
-            cachedGroupedSeries = null;
-        }
-    }
-
-    public List<Channel> getAllChannels() {
-        List<Channel> cached = cachedAllChannels;
-        if (cached != null) return cached;
-        synchronized (mediaCacheLock) {
-            if (cachedAllChannels != null) return cachedAllChannels;
-            Map<String, Channel> unique = new LinkedHashMap<>();
-            for (Playlist playlist : playlists) for (Channel channel : playlist.channels) {
-                if (!unique.containsKey(channel.id)) unique.put(channel.id, channel);
-            }
-            cachedAllChannels = Collections.unmodifiableList(new ArrayList<>(unique.values()));
-            return cachedAllChannels;
-        }
-    }
+    public List<Channel> getAllChannels() { return catalog.all; }
 
     public List<Channel> getLiveChannels() {
-        List<Channel> cached = cachedLiveChannels;
-        if (cached != null) return cached;
-        synchronized (mediaCacheLock) {
-            if (cachedLiveChannels != null) return cachedLiveChannels;
-            List<Channel> list = new ArrayList<>();
-            for (Channel c : getAllChannels()) {
-                if (c.getKind() == MediaKind.LIVE) list.add(c);
-            }
-            cachedLiveChannels = Collections.unmodifiableList(list);
-            return cachedLiveChannels;
-        }
+        Catalog snapshot = catalog;
+        snapshot.classify();
+        return snapshot.live;
     }
 
     public List<Channel> getMovieChannels() {
-        List<Channel> cached = cachedMovieChannels;
-        if (cached != null) return cached;
-        synchronized (mediaCacheLock) {
-            if (cachedMovieChannels != null) return cachedMovieChannels;
-            List<Channel> list = new ArrayList<>();
-            for (Channel c : getAllChannels()) {
-                if (c.getKind() == MediaKind.MOVIE) list.add(c);
-            }
-            cachedMovieChannels = Collections.unmodifiableList(list);
-            return cachedMovieChannels;
-        }
+        Catalog snapshot = catalog;
+        snapshot.classify();
+        return snapshot.movies;
     }
 
     public List<Channel> getSeriesChannels() {
-        List<Channel> cached = cachedSeriesChannels;
-        if (cached != null) return cached;
-        synchronized (mediaCacheLock) {
-            if (cachedSeriesChannels != null) return cachedSeriesChannels;
-            List<Channel> list = new ArrayList<>();
-            for (Channel c : getAllChannels()) {
-                if (c.getKind() == MediaKind.SERIES) list.add(c);
-            }
-            cachedSeriesChannels = Collections.unmodifiableList(list);
-            return cachedSeriesChannels;
-        }
+        Catalog snapshot = catalog;
+        snapshot.classify();
+        return snapshot.episodes;
     }
 
-    public List<SeriesItem> peekGroupedSeries() {
-        return cachedGroupedSeries;
-    }
+    public List<SeriesItem> getGroupedSeries() { return catalog.groupedSeries(); }
 
-    public List<SeriesItem> getGroupedSeries() {
-        List<SeriesItem> cached = cachedGroupedSeries;
-        if (cached != null) return cached;
-        synchronized (mediaCacheLock) {
-            if (cachedGroupedSeries != null) return cachedGroupedSeries;
-            List<Channel> seriesChannels = getSeriesChannels();
-            List<SeriesItem> grouped = SeriesParser.groupSeries(seriesChannels);
-            cachedGroupedSeries = Collections.unmodifiableList(grouped);
-            return cachedGroupedSeries;
-        }
-    }
-
-    public interface SeriesCallback {
-        void onLoaded(List<SeriesItem> series);
-    }
-
-    public void loadGroupedSeriesAsync(SeriesCallback callback) {
-        List<SeriesItem> cached = cachedGroupedSeries;
-        if (cached != null) {
-            if (callback != null) callback.onLoaded(cached);
-            return;
-        }
-        mediaCacheExecutor.execute(() -> {
-            List<SeriesItem> result = getGroupedSeries();
-            new Handler(Looper.getMainLooper()).post(() -> {
-                if (callback != null) callback.onLoaded(result);
-            });
+    private void precomputeMediaCacheAsync() {
+        Catalog snapshot = catalog;
+        MEDIA_WORKER.execute(() -> {
+            if (snapshot == catalog) snapshot.groupedSeries();
         });
     }
 
-    public void precomputeMediaCacheAsync() {
-        mediaCacheExecutor.execute(() -> {
-            try {
-                getAllChannels();
-                getLiveChannels();
-                getMovieChannels();
-                getSeriesChannels();
-                getGroupedSeries();
-            } catch (Exception ignored) {}
-        });
-    }
-
-    public Channel findChannel(String id) {
-        for (Playlist playlist : playlists) for (Channel channel : playlist.channels) if (channel.id.equals(id)) return channel;
-        return null;
-    }
+    public Channel findChannel(String id) { return catalog.byId.get(id); }
 
     public Playlist importUrl(String name, String url) throws IOException {
         ensureLoaded();
@@ -266,87 +216,102 @@ public final class PlaylistRepository {
         }
     }
 
+    private static String demoUrl(String path, String id) {
+        int slash = path.indexOf('/');
+        if (slash < 0) return "https://test-streams.mux.dev/" + path;
+        String kind = path.substring(0, slash);
+        if (!kind.equals("live") && !kind.equals("series") && !kind.equals("movie"))
+            return "https://test-streams.mux.dev/" + path;
+        return "asset:///demo/" + kind + "/sample.mp4#" + id;
+    }
+
+    private static Channel demoChannel(String name, String legacyPath, String group, String tvgId) {
+        // Retain favorites and watch positions from earlier versions of the built-in list.
+        String id = Channel.stableId("https://test-streams.mux.dev/" + legacyPath);
+        return new Channel(id, name, demoUrl(legacyPath, id), group, "", tvgId, "", "");
+    }
+
     public synchronized Playlist addDemoPlaylist() throws IOException {
         ensureLoaded();
         List<Channel> channels = new ArrayList<>();
 
         // 1. Live TV Channels (matching user reference mockup)
-        channels.add(Channel.create("DAZN LaLiga", "https://test-streams.mux.dev/live/dazn_laliga.m3u8", "EU-ES DAZN", "", "dazn.es", "", ""));
-        channels.add(Channel.create("La 1 HD", "https://test-streams.mux.dev/live/la1.m3u8", "ES | GENERALISTAS", "", "la1.es", "", ""));
-        channels.add(Channel.create("Antena 3", "https://test-streams.mux.dev/live/antena3.m3u8", "ES | GENERALISTAS", "", "antena3.es", "", ""));
-        channels.add(Channel.create("Movistar Cine", "https://test-streams.mux.dev/live/movistar_cine.ts", "ES | CINE", "", "mcine.es", "", ""));
-        channels.add(Channel.create("Eurosport", "https://test-streams.mux.dev/live/eurosport.ts", "ES | DEPORTES", "", "eurosport.es", "", ""));
-        channels.add(Channel.create("National Geographic", "https://test-streams.mux.dev/live/natgeo.ts", "ES | DOCUMENTALES", "", "natgeo.es", "", ""));
-        channels.add(Channel.create("laSexta", "https://test-streams.mux.dev/live/lasexta.m3u8", "ES | GENERALISTAS", "", "lasexta.es", "", ""));
-        channels.add(Channel.create("Cuatro", "https://test-streams.mux.dev/live/cuatro.m3u8", "ES | GENERALISTAS", "", "cuatro.es", "", ""));
+        channels.add(demoChannel("DAZN LaLiga", "live/dazn_laliga.m3u8", "EU-ES DAZN", "dazn.es"));
+        channels.add(demoChannel("La 1 HD", "live/la1.m3u8", "ES | GENERALISTAS", "la1.es"));
+        channels.add(demoChannel("Antena 3", "live/antena3.m3u8", "ES | GENERALISTAS", "antena3.es"));
+        channels.add(demoChannel("Movistar Cine", "live/movistar_cine.ts", "ES | CINE", "mcine.es"));
+        channels.add(demoChannel("Eurosport", "live/eurosport.ts", "ES | DEPORTES", "eurosport.es"));
+        channels.add(demoChannel("National Geographic", "live/natgeo.ts", "ES | DOCUMENTALES", "natgeo.es"));
+        channels.add(demoChannel("laSexta", "live/lasexta.m3u8", "ES | GENERALISTAS", "lasexta.es"));
+        channels.add(demoChannel("Cuatro", "live/cuatro.m3u8", "ES | GENERALISTAS", "cuatro.es"));
 
         // 2. Movies (matching user reference mockup)
-        channels.add(Channel.create("La mangosta", "https://test-streams.mux.dev/movie/mangosta.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("El vestido", "https://test-streams.mux.dev/movie/vestido.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("Colisión", "https://test-streams.mux.dev/movie/colision.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("Kraken", "https://test-streams.mux.dev/movie/kraken.mkv", "ES | PELÍCULAS 2026 (MKV)", "", "", "", ""));
-        channels.add(Channel.create("Recreación de un asesinato", "https://test-streams.mux.dev/movie/recreacion.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("Insidious: Fuera del límite", "https://test-streams.mux.dev/movie/insidious.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("La última chispa de esperanza", "https://test-streams.mux.dev/movie/chispa.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("¿Por qué me casé otra vez?", "https://test-streams.mux.dev/movie/porque.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("En la ruta del crimen", "https://test-streams.mux.dev/movie/crimen.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("Sintel", "https://test-streams.mux.dev/movie/sintel.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("Luces en la catedral", "https://test-streams.mux.dev/movie/luces.mp4", "ES | PELÍCULAS 2026 (MP4)", "", "", "", ""));
-        channels.add(Channel.create("Cómo entrenar a tu dragón 2", "https://test-streams.mux.dev/movie/dragon.mp4", "ES | PELÍCULAS ANIMACIÓN", "", "", "", ""));
+        channels.add(demoChannel("La mangosta", "movie/mangosta.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("El vestido", "movie/vestido.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("Colisión", "movie/colision.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("Kraken", "movie/kraken.mkv", "ES | PELÍCULAS 2026 (MKV)", ""));
+        channels.add(demoChannel("Recreación de un asesinato", "movie/recreacion.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("Insidious: Fuera del límite", "movie/insidious.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("La última chispa de esperanza", "movie/chispa.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("¿Por qué me casé otra vez?", "movie/porque.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("En la ruta del crimen", "movie/crimen.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("Sintel", "movie/sintel.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("Luces en la catedral", "movie/luces.mp4", "ES | PELÍCULAS 2026 (MP4)", ""));
+        channels.add(demoChannel("Cómo entrenar a tu dragón 2", "movie/dragon.mp4", "ES | PELÍCULAS ANIMACIÓN", ""));
 
         // 3. Series (multiple episodes per series to demonstrate 1-cover-per-series grouping and episode sheets)
         // Dark (3 seasons, 6 episodes)
-        channels.add(Channel.create("Dark S01 E01 - Secretos", "https://test-streams.mux.dev/series/dark_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Dark S01 E02 - Mentiras", "https://test-streams.mux.dev/series/dark_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Dark S01 E03 - Pasados y presentes", "https://test-streams.mux.dev/series/dark_s1e3.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Dark S02 E01 - Principios y finales", "https://test-streams.mux.dev/series/dark_s2e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Dark S02 E02 - Materia oscura", "https://test-streams.mux.dev/series/dark_s2e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Dark S03 E01 - Déjà-vu", "https://test-streams.mux.dev/series/dark_s3e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("Dark S01 E01 - Secretos", "series/dark_s1e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Dark S01 E02 - Mentiras", "series/dark_s1e2.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Dark S01 E03 - Pasados y presentes", "series/dark_s1e3.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Dark S02 E01 - Principios y finales", "series/dark_s2e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Dark S02 E02 - Materia oscura", "series/dark_s2e2.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Dark S03 E01 - Déjà-vu", "series/dark_s3e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // Stranger Things
-        channels.add(Channel.create("Stranger Things S01 E01", "https://test-streams.mux.dev/series/st_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Stranger Things S01 E02", "https://test-streams.mux.dev/series/st_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Stranger Things S02 E01", "https://test-streams.mux.dev/series/st_s2e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Stranger Things S02 E04 - El espía", "https://test-streams.mux.dev/series/st_s2e4.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("Stranger Things S01 E01", "series/st_s1e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Stranger Things S01 E02", "series/st_s1e2.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Stranger Things S02 E01", "series/st_s2e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Stranger Things S02 E04 - El espía", "series/st_s2e4.mp4", "ES | SERIES NETFLIX", ""));
 
         // Miércoles
-        channels.add(Channel.create("Miércoles S01 E01", "https://test-streams.mux.dev/series/wed_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("Miércoles S01 E02", "https://test-streams.mux.dev/series/wed_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("Miércoles S01 E01", "series/wed_s1e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("Miércoles S01 E02", "series/wed_s1e2.mp4", "ES | SERIES NETFLIX", ""));
 
         // La casa de papel
-        channels.add(Channel.create("La casa de papel S01 E01", "https://test-streams.mux.dev/series/lcdp_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("La casa de papel S01 E02", "https://test-streams.mux.dev/series/lcdp_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("La casa de papel S02 E01", "https://test-streams.mux.dev/series/lcdp_s2e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("La casa de papel S01 E01", "series/lcdp_s1e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("La casa de papel S01 E02", "series/lcdp_s1e2.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("La casa de papel S02 E01", "series/lcdp_s2e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // El juego del calamar
-        channels.add(Channel.create("El juego del calamar S01 E01", "https://test-streams.mux.dev/series/squid_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("El juego del calamar S01 E02", "https://test-streams.mux.dev/series/squid_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("El juego del calamar S01 E01", "series/squid_s1e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("El juego del calamar S01 E02", "series/squid_s1e2.mp4", "ES | SERIES NETFLIX", ""));
 
         // The Crown
-        channels.add(Channel.create("The Crown S01 E01", "https://test-streams.mux.dev/series/crown_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
-        channels.add(Channel.create("The Crown S01 E02", "https://test-streams.mux.dev/series/crown_s1e2.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("The Crown S01 E01", "series/crown_s1e1.mp4", "ES | SERIES NETFLIX", ""));
+        channels.add(demoChannel("The Crown S01 E02", "series/crown_s1e2.mp4", "ES | SERIES NETFLIX", ""));
 
         // Black Mirror
-        channels.add(Channel.create("Black Mirror S01 E01", "https://test-streams.mux.dev/series/bm_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("Black Mirror S01 E01", "series/bm_s1e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // The Witcher
-        channels.add(Channel.create("The Witcher S01 E01", "https://test-streams.mux.dev/series/witcher_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("The Witcher S01 E01", "series/witcher_s1e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // One Piece
-        channels.add(Channel.create("One Piece S01 E01", "https://test-streams.mux.dev/series/op_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("One Piece S01 E01", "series/op_s1e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // Lupin
-        channels.add(Channel.create("Lupin S01 E01", "https://test-streams.mux.dev/series/lupin_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("Lupin S01 E01", "series/lupin_s1e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // Élite
-        channels.add(Channel.create("Élite S01 E01", "https://test-streams.mux.dev/series/elite_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("Élite S01 E01", "series/elite_s1e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // You
-        channels.add(Channel.create("You S01 E01", "https://test-streams.mux.dev/series/you_s1e1.mp4", "ES | SERIES NETFLIX", "", "", "", ""));
+        channels.add(demoChannel("You S01 E01", "series/you_s1e1.mp4", "ES | SERIES NETFLIX", ""));
 
         // Additional providers
-        channels.add(Channel.create("The Boys S01 E01", "https://test-streams.mux.dev/series/theboys_s1e1.mp4", "ES | SERIES AMAZON", "", "", "", ""));
-        channels.add(Channel.create("Succession S01 E01", "https://test-streams.mux.dev/series/succession_s1e1.mp4", "ES | SERIES HBO MAX", "", "", "", ""));
+        channels.add(demoChannel("The Boys S01 E01", "series/theboys_s1e1.mp4", "ES | SERIES AMAZON", ""));
+        channels.add(demoChannel("Succession S01 E01", "series/succession_s1e1.mp4", "ES | SERIES HBO MAX", ""));
 
         Playlist result = new Playlist(DEMO_ID, "Lista de prueba", "demo:", channels, System.currentTimeMillis());
         put(result);
@@ -366,15 +331,14 @@ public final class PlaylistRepository {
 
     public synchronized void removePlaylist(String id) throws IOException {
         ensureLoaded();
-        List<Playlist> next = new ArrayList<>(playlists);
+        List<Playlist> next = new ArrayList<>(getPlaylists());
         for (int i = next.size() - 1; i >= 0; i--) if (next.get(i).id.equals(id)) next.remove(i);
         save(next);
-        playlists = Collections.unmodifiableList(next);
-        invalidateMediaCache();
+        catalog = new Catalog(next);
         precomputeMediaCacheAsync();
     }
 
-    public boolean isFavorite(String channelId) { return getFavoriteIds().contains(channelId); }
+    public boolean isFavorite(String channelId) { return preferences.getStringSet("favorites", Collections.emptySet()).contains(channelId); }
 
     public boolean toggleFavorite(String channelId) {
         synchronized (PREFERENCES_LOCK) {
@@ -414,22 +378,21 @@ public final class PlaylistRepository {
 
     private synchronized void ensureLoaded() throws IOException { if (!loaded) load(); }
     private Playlist findPlaylist(String id) {
-        for (Playlist playlist : playlists) if (playlist.id.equals(id)) return playlist;
+        for (Playlist playlist : getPlaylists()) if (playlist.id.equals(id)) return playlist;
         return null;
     }
     private Playlist findBySource(String source) {
-        for (Playlist playlist : playlists) if (playlist.source.equals(source)) return playlist;
+        for (Playlist playlist : getPlaylists()) if (playlist.source.equals(source)) return playlist;
         return null;
     }
 
     private synchronized void put(Playlist playlist) throws IOException {
-        List<Playlist> next = new ArrayList<>(playlists);
+        List<Playlist> next = new ArrayList<>(getPlaylists());
         int existingIndex = -1;
         for (int i = 0; i < next.size(); i++) if (next.get(i).id.equals(playlist.id)) { existingIndex = i; break; }
         if (existingIndex >= 0) next.set(existingIndex, playlist); else next.add(playlist);
         save(next);
-        playlists = Collections.unmodifiableList(next);
-        invalidateMediaCache();
+        catalog = new Catalog(next);
         precomputeMediaCacheAsync();
     }
 

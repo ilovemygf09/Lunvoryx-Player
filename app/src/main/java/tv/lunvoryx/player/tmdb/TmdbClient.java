@@ -22,11 +22,14 @@ public final class TmdbClient {
     public static class Details {
         public String title;
         public String overview;
+        public int runtime;
+        public String language, director;
         public String posterUrl;
         public String backdropUrl;
         public String releaseDate;
         public double rating;
         public String trailerUrl;
+        public final List<String> castPhotos = new ArrayList<>();
         public List<String> cast = new ArrayList<>();
     }
 
@@ -89,8 +92,18 @@ public final class TmdbClient {
                 if (details.overview == null || details.overview.isEmpty()) {
                     details.overview = fullObj.optString("overview", "");
                 }
+                details.runtime = fullObj.optInt("runtime");
+                details.language = fullObj.optString("original_language");
                 JSONObject credits = fullObj.optJSONObject("credits");
                 if (credits != null) {
+                    JSONArray crew = credits.optJSONArray("crew");
+                    for (int i = 0; crew != null && i < crew.length(); i++) {
+                        JSONObject member = crew.optJSONObject(i);
+                        if (member != null && "Director".equals(member.optString("job"))) {
+                            details.director = member.optString("name");
+                            break;
+                        }
+                    }
                     JSONArray castArray = credits.optJSONArray("cast");
                     if (castArray != null) {
                         for (int i = 0; i < Math.min(castArray.length(), 6); i++) {
@@ -98,6 +111,8 @@ public final class TmdbClient {
                             String name = actor.optString("name", "");
                             String charName = actor.optString("character", "");
                             if (!name.isEmpty()) {
+                                String path = actor.optString("profile_path", "");
+                                details.castPhotos.add(path.startsWith("/") ? "https://image.tmdb.org/t/p/w185" + path : "");
                                 details.cast.add(charName.isEmpty() ? name : name + " (" + charName + ")");
                             }
                         }

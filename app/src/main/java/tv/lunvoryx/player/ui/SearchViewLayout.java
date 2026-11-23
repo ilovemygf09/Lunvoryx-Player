@@ -16,6 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import androidx.recyclerview.widget.ConcatAdapter;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import org.json.JSONArray;
@@ -23,10 +24,9 @@ import tv.lunvoryx.player.R;
 import tv.lunvoryx.player.data.Channel;
 import tv.lunvoryx.player.data.MediaKind;
 import tv.lunvoryx.player.data.PlaylistRepository;
-import tv.lunvoryx.player.tmdb.TmdbClient;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -48,11 +48,19 @@ public final class SearchViewLayout extends LinearLayout {
     private int filterType = 0;
     private String currentQuery = "";
 
-    // Search results separated by type
-    private final List<Channel> liveMatches = new ArrayList<>();
-    private final List<Channel> seriesMatches = new ArrayList<>();
-    private final List<Channel> movieMatches = new ArrayList<>();
-    private final List<Channel> allCurrentMatches = new ArrayList<>();
+    private static final class Matches {
+        final List<Channel> all = new ArrayList<>();
+        final List<Channel> live = new ArrayList<>();
+        final List<Channel> series = new ArrayList<>();
+        final List<Channel> movies = new ArrayList<>();
+        final List<String> trends = new ArrayList<>();
+    }
+
+    private final PreviewMetadata metadata = new PreviewMetadata();
+    private final CatalogTask searchTask = new CatalogTask();
+    private List<Channel> allCurrentMatches = Collections.emptyList();
+    private ResultSection liveSection, seriesSection, movieSection;
+    private RecyclerView resultsList;
 
     // UI elements
     private EditText searchField;
@@ -60,7 +68,6 @@ public final class SearchViewLayout extends LinearLayout {
     private LinearLayout recentSearchesContainer;
     private LinearLayout trendingContainer;
     private TextView resultsHeaderSubtitle;
-    private LinearLayout resultsGroupsContainer;
 
     // Preview panel
     private ImageView previewBackdrop;
@@ -71,8 +78,6 @@ public final class SearchViewLayout extends LinearLayout {
     private TextView btnPlay;
     private TextView btnFav;
     private TextView btnInfo;
-    private LinearLayout seasonsBlock;
-    private LinearLayout nextEpisodeBlock;
 
     private Channel currentSelectedChannel;
 
@@ -85,7 +90,17 @@ public final class SearchViewLayout extends LinearLayout {
 
         setOrientation(VERTICAL);
         buildUi();
-        performSearch("");
+    }
+
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        performSearch(currentQuery);
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        searchTask.cancel();
+        metadata.cancel();
+        super.onDetachedFromWindow();
     }
 
     private void buildUi() {
@@ -332,7 +347,7 @@ public final class SearchViewLayout extends LinearLayout {
         inner.addView(trendingContainer);
 
         renderRecentSearches();
-        renderTrending();
+
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, 180), -1);
         lp.rightMargin = dp(context, 10);
@@ -342,9 +357,6 @@ public final class SearchViewLayout extends LinearLayout {
     private void renderRecentSearches() {
         recentSearchesContainer.removeAllViews();
         List<String> recents = getRecentSearches();
-        if (recents.isEmpty()) {
-            recents = Arrays.asList("ted lasso", "horizonte azul", "la frontera", "nexo", "fórmula 1");
-        }
 
         for (String query : recents) {
             LinearLayout item = new LinearLayout(context);
@@ -394,20 +406,8 @@ public final class SearchViewLayout extends LinearLayout {
         }
     }
 
-    private void renderTrending() {
+    private void renderTrending(List<String> trends) {
         trendingContainer.removeAllViews();
-        // Dynamically extract trending terms from user channels (or fallbacks)
-        List<String> trends = new ArrayList<>();
-        int count = 0;
-        for (Channel c : repository.getAllChannels()) {
-            if (!c.group.isEmpty() && !trends.contains(c.group) && !c.group.equalsIgnoreCase("Todos")) {
-                trends.add(c.group);
-                if (++count == 5) break;
-            }
-        }
-        if (trends.isEmpty()) {
-            trends = Arrays.asList("Premier League", "Succession", "Dune", "El señor de los anillos", "True Detective");
-        }
 
         for (String term : trends) {
             LinearLayout item = new LinearLayout(context);
@@ -481,15 +481,16 @@ public final class SearchViewLayout extends LinearLayout {
         rHead.addView(resultsHeaderSubtitle);
         colB.addView(rHead);
 
-        // Scrollable Results Groups (Canales en vivo, Series, Películas)
-        ScrollView scroller = new ScrollView(context);
-        scroller.setFillViewport(true);
-        scroller.setVerticalScrollBarEnabled(false);
-        resultsGroupsContainer = new LinearLayout(context);
-        resultsGroupsContainer.setOrientation(VERTICAL);
-        resultsGroupsContainer.setPadding(0, dp(context, 10), 0, 0);
-        scroller.addView(resultsGroupsContainer);
-        colB.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1));
+        boolean english = AppStrings.isEnglish(context);
+        liveSection = new ResultSection("tv", english ? "Live TV Channels" : "Canales en vivo");
+        seriesSection = new ResultSection("series", "Series");
+        movieSection = new ResultSection("movie", english ? "Movies" : "Películas");
+        resultsList = new RecyclerView(context);
+        resultsList.setLayoutManager(new LinearLayoutManager(context));
+        resultsList.setItemAnimator(null);
+        resultsList.setPadding(0, dp(context, 10), 0, 0);
+        resultsList.setAdapter(new ConcatAdapter(liveSection, seriesSection, movieSection));
+        colB.addView(resultsList, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1);
         lp.rightMargin = dp(context, 10);
@@ -640,253 +641,227 @@ public final class SearchViewLayout extends LinearLayout {
 
         inner.addView(btnRow);
 
-        // Seasons Block
-        seasonsBlock = new LinearLayout(context);
-        seasonsBlock.setOrientation(VERTICAL);
-        seasonsBlock.setPadding(0, dp(context, 10), 0, 0);
-        inner.addView(seasonsBlock);
-
-        // Next Episode Block ("A continuación")
-        nextEpisodeBlock = new LinearLayout(context);
-        nextEpisodeBlock.setOrientation(VERTICAL);
-        nextEpisodeBlock.setPadding(0, dp(context, 10), 0, 0);
-        inner.addView(nextEpisodeBlock);
-
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, 260), -1);
         body.addView(colC, lp);
     }
 
     private void performSearch(String q) {
         currentQuery = q != null ? q.trim() : "";
-        liveMatches.clear();
-        seriesMatches.clear();
-        movieMatches.clear();
-        allCurrentMatches.clear();
-
         String norm = currentQuery.toLowerCase(Locale.ROOT);
-        Set<String> favIds = repository.getFavoriteIds();
+        int filter = filterType;
+        boolean needTrends = trendingContainer.getChildCount() == 0;
+        resultsHeaderSubtitle.setText(AppStrings.isEnglish(context) ? "Searching…" : "Buscando…");
+        searchTask.submit(() -> {
+            Matches result = new Matches();
+            Set<String> favorites = filter == 4 ? repository.getFavoriteIds() : Collections.emptySet();
+            for (Channel c : repository.getAllChannels()) {
+                if (Thread.currentThread().isInterrupted()) break;
+                if (needTrends && result.trends.size() < 5 && !c.group.isEmpty()
+                        && !c.group.equalsIgnoreCase("Todos") && !result.trends.contains(c.group)) {
+                    result.trends.add(c.group);
+                }
+                if (filter == 4 && !favorites.contains(c.id)) continue;
+                if (!norm.isEmpty() && !c.name.toLowerCase(Locale.ROOT).contains(norm)
+                        && !c.group.toLowerCase(Locale.ROOT).contains(norm)) continue;
+                MediaKind kind = c.getKind();
+                if (filter == 1 && kind != MediaKind.LIVE || filter == 2 && kind != MediaKind.MOVIE
+                        || filter == 3 && kind != MediaKind.SERIES) continue;
+                result.all.add(c);
+                if (kind == MediaKind.LIVE) result.live.add(c);
+                else if (kind == MediaKind.SERIES) result.series.add(c);
+                else result.movies.add(c);
+            }
+            return result;
+        }, result -> {
+            allCurrentMatches = result.all;
+            liveSection.update(result.live);
+            seriesSection.update(result.series);
+            movieSection.update(result.movies);
+            if (needTrends) renderTrending(result.trends);
+            int total = result.all.size();
+            boolean english = AppStrings.isEnglish(context);
+            resultsHeaderSubtitle.setText(currentQuery.isEmpty()
+                    ? total + (english ? " items in library" : " contenidos en biblioteca")
+                    : total + (english ? " results for «" : " resultados para «") + currentQuery + "»");
+            if (total > 0) {
+                resultsList.scrollToPosition(0);
+                selectForPreview(result.all.get(0));
+            } else clearPreview();
+        });
+    }
 
-        for (Channel c : repository.getAllChannels()) {
-            boolean matchesQuery = norm.isEmpty() ||
-                    c.name.toLowerCase(Locale.ROOT).contains(norm) ||
-                    c.group.toLowerCase(Locale.ROOT).contains(norm);
-            if (!matchesQuery) continue;
+    private final class ResultSection extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+        final String icon, label;
+        List<Channel> items = Collections.emptyList();
 
-            boolean isFav = favIds.contains(c.id);
-            if (filterType == 4 && !isFav) continue;
-
-            MediaKind kind = MediaKind.classify(c);
-            if (filterType == 1 && kind != MediaKind.LIVE) continue;
-            if (filterType == 2 && kind != MediaKind.MOVIE) continue;
-            if (filterType == 3 && kind != MediaKind.SERIES) continue;
-
-            if (kind == MediaKind.LIVE) liveMatches.add(c);
-            else if (kind == MediaKind.SERIES) seriesMatches.add(c);
-            else movieMatches.add(c);
-
-            allCurrentMatches.add(c);
+        ResultSection(String icon, String label) {
+            this.icon = icon;
+            this.label = label;
         }
 
-        int total = allCurrentMatches.size();
-        resultsHeaderSubtitle.setText(currentQuery.isEmpty() ?
-                (total + (AppStrings.isEnglish(context) ? " items in library" : " contenidos en biblioteca")) :
-                (total + (AppStrings.isEnglish(context) ? " results for «" : " resultados para «") + currentQuery + "»"));
+        void update(List<Channel> matches) {
+            items = matches;
+            notifyDataSetChanged();
+        }
 
-        renderGroupedResults();
+        @Override public int getItemCount() { return items.isEmpty() ? 0 : items.size() + 1; }
+        @Override public int getItemViewType(int position) { return position == 0 ? 0 : 1; }
 
-        if (!allCurrentMatches.isEmpty()) {
-            selectForPreview(allCurrentMatches.get(0));
-        } else {
-            clearPreview();
+        @Override public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int type) {
+            return type == 0 ? new GroupHeader(icon) : new ResultCard();
+        }
+
+        @Override public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+            if (position == 0) ((GroupHeader) holder).title.setText(label + " (" + items.size() + ")");
+            else ((ResultCard) holder).bind(items.get(position - 1));
         }
     }
 
-    private void renderGroupedResults() {
-        resultsGroupsContainer.removeAllViews();
+    private final class GroupHeader extends RecyclerView.ViewHolder {
+        final TextView title;
 
-        if (allCurrentMatches.isEmpty()) {
-            TextView empty = new TextView(context);
-            empty.setText(AppStrings.get(context, "empty_search"));
-            empty.setTextSize(13);
-            empty.setTextColor(0xFF8F91A2);
-            empty.setPadding(dp(context, 4), dp(context, 14), 0, 0);
-            resultsGroupsContainer.addView(empty);
-            return;
-        }
+        GroupHeader(String iconKind) {
+            super(new LinearLayout(context));
+            LinearLayout sectionHead = (LinearLayout) itemView;
+            sectionHead.setOrientation(HORIZONTAL);
+            sectionHead.setGravity(Gravity.CENTER_VERTICAL);
+            sectionHead.setPadding(0, dp(context, 8), 0, dp(context, 6));
 
-        // Section: Canales en vivo
-        if (!liveMatches.isEmpty() && (filterType == 0 || filterType == 1 || filterType == 4)) {
-            renderGroupSection("tv", (AppStrings.isEnglish(context) ? "Live TV Channels (" : "Canales en vivo (") + liveMatches.size() + ")", liveMatches);
-        }
+            LineIcon icon = new LineIcon(context, iconKind);
+            icon.setColor(0xFFFFFFFF);
+            sectionHead.addView(icon, new LinearLayout.LayoutParams(dp(context, 16), dp(context, 16)));
 
-        // Section: Series
-        if (!seriesMatches.isEmpty() && (filterType == 0 || filterType == 3 || filterType == 4)) {
-            renderGroupSection("series", (AppStrings.isEnglish(context) ? "Series (" : "Series (") + seriesMatches.size() + ")", seriesMatches);
-        }
+            title = new TextView(context);
+            title.setTextSize(13);
+            title.setTextColor(0xFFFFFFFF);
+            title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            title.setPadding(dp(context, 8), 0, 0, 0);
+            sectionHead.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
 
-        // Section: Películas
-        if (!movieMatches.isEmpty() && (filterType == 0 || filterType == 2 || filterType == 4)) {
-            renderGroupSection("movie", (AppStrings.isEnglish(context) ? "Movies (" : "Películas (") + movieMatches.size() + ")", movieMatches);
         }
     }
 
-    private void renderGroupSection(String iconKind, String titleText, List<Channel> items) {
-        LinearLayout sectionHead = new LinearLayout(context);
-        sectionHead.setOrientation(HORIZONTAL);
-        sectionHead.setGravity(Gravity.CENTER_VERTICAL);
-        sectionHead.setPadding(0, dp(context, 8), 0, dp(context, 6));
+    private final class ResultCard extends RecyclerView.ViewHolder {
+        final ImageView img;
+        final TextView name, init, typePill, extra, star;
+        Channel item;
 
-        LineIcon icon = new LineIcon(context, iconKind);
-        icon.setColor(0xFFFFFFFF);
-        sectionHead.addView(icon, new LinearLayout.LayoutParams(dp(context, 16), dp(context, 16)));
+        ResultCard() {
+            super(new LinearLayout(context));
+            LinearLayout card = (LinearLayout) itemView;
+            card.setOrientation(HORIZONTAL);
+            card.setGravity(Gravity.CENTER_VERTICAL);
+            card.setPadding(dp(context, 8), dp(context, 8), dp(context, 12), dp(context, 8));
+            card.setFocusable(true);
+            card.setClickable(true);
 
-        TextView title = new TextView(context);
-        title.setText(titleText);
-        title.setTextSize(13);
-        title.setTextColor(0xFFFFFFFF);
-        title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        title.setPadding(dp(context, 8), 0, 0, 0);
-        sectionHead.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+            SquircleGlassDrawable bg = TvStyle.squircleCard(context, 12);
+            card.setBackground(bg);
 
-        TextView seeAll = new TextView(context);
-        seeAll.setText(AppStrings.isEnglish(context) ? "See all ›" : "Ver todo ›");
-        seeAll.setTextSize(11);
-        seeAll.setTextColor(0xFF8F91A2);
-        sectionHead.addView(seeAll);
-        resultsGroupsContainer.addView(sectionHead);
+            // Thumbnail / Emblem (Landscape rounded)
+            FrameLayout emblem = new FrameLayout(context);
+            emblem.setBackground(TvStyle.squircleSolid(context, 10, 0xFF282C40));
+            emblem.setClipToOutline(true);
 
-        for (Channel c : items) {
-            resultsGroupsContainer.addView(buildItemCard(c));
+            img = new ImageView(context);
+            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            emblem.addView(img, new FrameLayout.LayoutParams(-1, -1));
+
+            init = new TextView(context);
+            init.setTextSize(14);
+            init.setTextColor(0xFFCACBD4);
+            init.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            init.setGravity(Gravity.CENTER);
+            emblem.addView(init, new FrameLayout.LayoutParams(-1, -1));
+
+            card.addView(emblem, new LinearLayout.LayoutParams(dp(context, 68), dp(context, 44)));
+
+            // Details Column
+            LinearLayout det = new LinearLayout(context);
+            det.setOrientation(VERTICAL);
+            det.setPadding(dp(context, 10), 0, dp(context, 8), 0);
+
+            LinearLayout titleRow = new LinearLayout(context);
+            titleRow.setOrientation(HORIZONTAL);
+            titleRow.setGravity(Gravity.CENTER_VERTICAL);
+
+            name = new TextView(context);
+            name.setTextSize(13);
+            name.setTextColor(0xFFFFFFFF);
+            name.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            name.setSingleLine(true);
+            name.setEllipsize(TextUtils.TruncateAt.END);
+            titleRow.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+
+
+            det.addView(titleRow);
+
+            // Tags & Info line
+            LinearLayout infoRow = new LinearLayout(context);
+            infoRow.setOrientation(HORIZONTAL);
+            infoRow.setGravity(Gravity.CENTER_VERTICAL);
+            infoRow.setPadding(0, dp(context, 4), 0, 0);
+
+            typePill = new TextView(context);
+            typePill.setTextSize(9);
+            typePill.setTextColor(0xFF8F91A2);
+            infoRow.addView(typePill);
+
+            extra = new TextView(context);
+            extra.setTextSize(9);
+            extra.setTextColor(0xFF75788E);
+            extra.setSingleLine(true);
+            extra.setEllipsize(TextUtils.TruncateAt.END);
+            infoRow.addView(extra, new LinearLayout.LayoutParams(0, -2, 1));
+
+            det.addView(infoRow);
+            card.addView(det, new LinearLayout.LayoutParams(0, -2, 1));
+
+            // Star indicator
+            star = new TextView(context);
+            star.setTextSize(14);
+            card.addView(star);
+
+            card.setOnClickListener(v -> {
+                if (listener != null && item != null) {
+                    int index = allCurrentMatches.indexOf(item);
+                    if (index >= 0) listener.onPlay(item, allCurrentMatches, index);
+                }
+            });
+
+            card.setOnFocusChangeListener((v, f) -> {
+                if (f && item != null) {
+                    selectForPreview(item);
+                }
+                bg.setFocused(f);
+            });
+
         }
-    }
 
-    private View buildItemCard(Channel c) {
-        LinearLayout card = new LinearLayout(context);
-        card.setOrientation(HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(context, 8), dp(context, 8), dp(context, 12), dp(context, 8));
-        card.setFocusable(true);
-        card.setClickable(true);
-
-        SquircleGlassDrawable bg = TvStyle.squircleCard(context, 12);
-        card.setBackground(bg);
-
-        // Thumbnail / Emblem (Landscape rounded)
-        FrameLayout emblem = new FrameLayout(context);
-        emblem.setBackground(TvStyle.squircleSolid(context, 10, 0xFF282C40));
-        emblem.setClipToOutline(true);
-
-        ImageView img = new ImageView(context);
-        img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        emblem.addView(img, new FrameLayout.LayoutParams(-1, -1));
-
-        TextView init = new TextView(context);
-        init.setTextSize(14);
-        init.setTextColor(0xFFCACBD4);
-        init.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        init.setGravity(Gravity.CENTER);
-        emblem.addView(init, new FrameLayout.LayoutParams(-1, -1));
-
-        if (!c.logoUrl.isEmpty()) {
-            init.setVisibility(GONE);
+        void bind(Channel c) {
+            item = c;
+            name.setText(c.name);
+            MediaKind kind = c.getKind();
+            typePill.setText(kind == MediaKind.LIVE ? "Canal en vivo" : kind == MediaKind.MOVIE ? "Película" : "Serie");
+            extra.setText(" • " + (c.group.isEmpty() ? "General" : c.group));
+            boolean favorite = repository.isFavorite(c.id);
+            star.setText(favorite ? "★" : "☆");
+            star.setTextColor(favorite ? 0xFFFFD700 : 0xFF75788E);
             LogoLoader.load(c.logoUrl, img);
-        } else {
-            img.setImageDrawable(null);
-            init.setVisibility(VISIBLE);
-            String t = c.name.trim();
-            init.setText(t.length() > 2 ? t.substring(0, 2).toUpperCase(Locale.ROOT) : t.toUpperCase(Locale.ROOT));
+            init.setVisibility(c.logoUrl.isEmpty() ? VISIBLE : GONE);
+            if (c.logoUrl.isEmpty()) init.setText(c.name.substring(0, Math.min(2, c.name.length())).toUpperCase(Locale.ROOT));
+            if (itemView.hasFocus()) selectForPreview(c);
         }
-
-        card.addView(emblem, new LinearLayout.LayoutParams(dp(context, 68), dp(context, 44)));
-
-        // Details Column
-        LinearLayout det = new LinearLayout(context);
-        det.setOrientation(VERTICAL);
-        det.setPadding(dp(context, 10), 0, dp(context, 8), 0);
-
-        LinearLayout titleRow = new LinearLayout(context);
-        titleRow.setOrientation(HORIZONTAL);
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView name = new TextView(context);
-        name.setText(c.name);
-        name.setTextSize(13);
-        name.setTextColor(0xFFFFFFFF);
-        name.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        name.setSingleLine(true);
-        name.setEllipsize(TextUtils.TruncateAt.END);
-        titleRow.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
-
-        TextView hdBadge = new TextView(context);
-        hdBadge.setText("HD");
-        hdBadge.setTextSize(9);
-        hdBadge.setTextColor(0xFFB5B6C2);
-        hdBadge.setPadding(dp(context, 5), dp(context, 1), dp(context, 5), dp(context, 1));
-        GradientDrawable hdbg = new GradientDrawable();
-        hdbg.setColor(0xFF2A2E44);
-        hdbg.setCornerRadius(dp(context, 4));
-        hdBadge.setBackground(hdbg);
-        titleRow.addView(hdBadge);
-
-        det.addView(titleRow);
-
-        // Tags & Info line
-        LinearLayout infoRow = new LinearLayout(context);
-        infoRow.setOrientation(HORIZONTAL);
-        infoRow.setGravity(Gravity.CENTER_VERTICAL);
-        infoRow.setPadding(0, dp(context, 4), 0, 0);
-
-        TextView typePill = new TextView(context);
-        MediaKind k = MediaKind.classify(c);
-        typePill.setText(k == MediaKind.LIVE ? "Canal en vivo" : (k == MediaKind.MOVIE ? "Película" : "Serie"));
-        typePill.setTextSize(9);
-        typePill.setTextColor(0xFF8F91A2);
-        infoRow.addView(typePill);
-
-        TextView extra = new TextView(context);
-        extra.setText(" • " + (c.group.isEmpty() ? "General" : c.group));
-        extra.setTextSize(9);
-        extra.setTextColor(0xFF75788E);
-        extra.setSingleLine(true);
-        extra.setEllipsize(TextUtils.TruncateAt.END);
-        infoRow.addView(extra, new LinearLayout.LayoutParams(0, -2, 1));
-
-        det.addView(infoRow);
-        card.addView(det, new LinearLayout.LayoutParams(0, -2, 1));
-
-        // Star indicator
-        TextView star = new TextView(context);
-        star.setText(repository.isFavorite(c.id) ? "★" : "☆");
-        star.setTextSize(14);
-        star.setTextColor(repository.isFavorite(c.id) ? 0xFFFFD700 : 0xFF75788E);
-        card.addView(star);
-
-        card.setOnClickListener(v -> {
-            if (listener != null) {
-                listener.onPlay(c, allCurrentMatches, allCurrentMatches.indexOf(c));
-            }
-        });
-
-        card.setOnFocusChangeListener((v, f) -> {
-            if (f) {
-                selectForPreview(c);
-            }
-            bg.setFocused(f);
-        });
-
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
-        clp.bottomMargin = dp(context, 6);
-        return card;
     }
 
     private void selectForPreview(Channel c) {
         currentSelectedChannel = c;
         previewTitle.setText(c.name);
 
-        MediaKind kind = MediaKind.classify(c);
+        MediaKind kind = c.getKind();
         renderPreviewTags(kind, c.group);
 
-        previewMeta.setText((kind == MediaKind.LIVE ? "En directo" : "2026") + "  •  " + (c.group.isEmpty() ? "General" : c.group) + "  •  HD");
+        previewMeta.setText(c.group);
         previewOverview.setText(AppStrings.isEnglish(context) ?
                 "High quality broadcast available in your local IPTV library." :
                 "Emisión en alta calidad disponible en tu biblioteca IPTV local.");
@@ -894,28 +869,20 @@ public final class SearchViewLayout extends LinearLayout {
         if (!c.logoUrl.isEmpty()) {
             LogoLoader.load(c.logoUrl, previewBackdrop);
         } else {
+            LogoLoader.clear(previewBackdrop);
             previewBackdrop.setImageBitmap(Artwork.get(context,
                     kind == MediaKind.LIVE ? R.drawable.category_live :
                             (kind == MediaKind.MOVIE ? R.drawable.category_movies : R.drawable.category_series), 400));
         }
 
         updateFavState();
-        buildSeasonsOrEpisodesBlock(c, kind);
 
-        if (TmdbClient.hasApiKey(context) && kind != MediaKind.LIVE) {
-            new Thread(() -> {
-                TmdbClient.Details d = TmdbClient.searchAndGetDetails(context, c.name, kind == MediaKind.MOVIE, AppStrings.getLang(context));
-                if (d != null) {
-                    post(() -> {
-                        if (currentSelectedChannel == c) {
-                            if (d.overview != null && !d.overview.isEmpty()) previewOverview.setText(d.overview);
-                            if (d.backdropUrl != null) LogoLoader.load(d.backdropUrl, previewBackdrop);
-                            else if (d.posterUrl != null) LogoLoader.load(d.posterUrl, previewBackdrop);
-                        }
-                    });
-                }
-            }).start();
-        }
+        if (kind == MediaKind.LIVE) metadata.cancel();
+        else metadata.load(context, c.name, kind == MediaKind.MOVIE, details -> {
+            if (details.overview != null && !details.overview.isEmpty()) previewOverview.setText(details.overview);
+            if (details.backdropUrl != null) LogoLoader.load(details.backdropUrl, previewBackdrop);
+            else if (details.posterUrl != null) LogoLoader.load(details.posterUrl, previewBackdrop);
+        });
     }
 
     private void renderPreviewTags(MediaKind kind, String group) {
@@ -940,97 +907,6 @@ public final class SearchViewLayout extends LinearLayout {
         }
     }
 
-    private void buildSeasonsOrEpisodesBlock(Channel c, MediaKind kind) {
-        seasonsBlock.removeAllViews();
-        nextEpisodeBlock.removeAllViews();
-
-        if (kind == MediaKind.SERIES) {
-            TextView label = new TextView(context);
-            label.setText(AppStrings.isEnglish(context) ? "Seasons" : "Temporadas");
-            label.setTextSize(11);
-            label.setTextColor(0xFFFFFFFF);
-            label.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-            label.setPadding(0, 0, 0, dp(context, 6));
-            seasonsBlock.addView(label);
-
-            LinearLayout seasonsRow = new LinearLayout(context);
-            seasonsRow.setOrientation(HORIZONTAL);
-            String[][] sData = {{"T1", "10 ep"}, {"T2", "12 ep"}, {"T3", "12 ep"}};
-            for (int i = 0; i < sData.length; i++) {
-                LinearLayout pill = new LinearLayout(context);
-                pill.setOrientation(VERTICAL);
-                pill.setGravity(Gravity.CENTER);
-                pill.setPadding(dp(context, 8), dp(context, 4), dp(context, 8), dp(context, 4));
-                GradientDrawable pbg = new GradientDrawable();
-                pbg.setColor(i == 2 ? 0xFFFFFFFF : 0xFF202334);
-                pbg.setCornerRadius(dp(context, 8));
-                pill.setBackground(pbg);
-
-                TextView st = new TextView(context);
-                st.setText(sData[i][0]);
-                st.setTextSize(11);
-                st.setTextColor(i == 2 ? 0xFF14151B : 0xFFFFFFFF);
-                st.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-                pill.addView(st);
-
-                TextView sc = new TextView(context);
-                sc.setText(sData[i][1]);
-                sc.setTextSize(8);
-                sc.setTextColor(i == 2 ? 0xFF14151B : 0xFF8F91A2);
-                pill.addView(sc);
-
-                LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(0, -2, 1);
-                if (i > 0) plp.leftMargin = dp(context, 6);
-                seasonsRow.addView(pill, plp);
-            }
-            seasonsBlock.addView(seasonsRow);
-        }
-
-        // Card "A continuación"
-        LinearLayout nextCard = new LinearLayout(context);
-        nextCard.setOrientation(VERTICAL);
-        GradientDrawable ncBg = new GradientDrawable();
-        ncBg.setColor(0xFF1E2130);
-        ncBg.setCornerRadius(dp(context, 8));
-        nextCard.setBackground(ncBg);
-        nextCard.setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8));
-
-        LinearLayout ncHead = new LinearLayout(context);
-        ncHead.setOrientation(HORIZONTAL);
-        ncHead.setGravity(Gravity.CENTER_VERTICAL);
-        LineIcon listIcon = new LineIcon(context, "list");
-        listIcon.setColor(0xFF8F91A2);
-        ncHead.addView(listIcon, new LinearLayout.LayoutParams(dp(context, 12), dp(context, 12)));
-
-        TextView ncTitle = new TextView(context);
-        ncTitle.setText(AppStrings.isEnglish(context) ? "Next" : "A continuación");
-        ncTitle.setTextSize(10);
-        ncTitle.setTextColor(0xFFCACBD4);
-        ncTitle.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        ncTitle.setPadding(dp(context, 6), 0, 0, 0);
-        ncHead.addView(ncTitle);
-        nextCard.addView(ncHead);
-
-        LinearLayout nextDetail = new LinearLayout(context);
-        nextDetail.setOrientation(HORIZONTAL);
-        nextDetail.setGravity(Gravity.CENTER_VERTICAL);
-        nextDetail.setPadding(0, dp(context, 6), 0, 0);
-
-        TextView nextEp = new TextView(context);
-        nextEp.setText(kind == MediaKind.SERIES ? "T3 - Episodio 1" : "Próximo contenido");
-        nextEp.setTextSize(11);
-        nextEp.setTextColor(0xFFFFFFFF);
-        nextEp.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        nextDetail.addView(nextEp, new LinearLayout.LayoutParams(0, -2, 1));
-
-        LineIcon playCircle = new LineIcon(context, "play");
-        playCircle.setColor(0xFFCACBD4);
-        nextDetail.addView(playCircle, new LinearLayout.LayoutParams(dp(context, 14), dp(context, 14)));
-
-        nextCard.addView(nextDetail);
-        nextEpisodeBlock.addView(nextCard);
-    }
-
     private void updateFavState() {
         if (currentSelectedChannel != null) {
             boolean fav = repository.isFavorite(currentSelectedChannel.id);
@@ -1039,14 +915,13 @@ public final class SearchViewLayout extends LinearLayout {
     }
 
     private void clearPreview() {
+        metadata.cancel();
         currentSelectedChannel = null;
         previewTitle.setText("");
         previewTagsRow.removeAllViews();
         previewMeta.setText("");
         previewOverview.setText(AppStrings.isEnglish(context) ? "No content found" : "No se encontraron contenidos");
-        previewBackdrop.setImageDrawable(null);
-        seasonsBlock.removeAllViews();
-        nextEpisodeBlock.removeAllViews();
+        LogoLoader.clear(previewBackdrop);
     }
 
     private List<String> getRecentSearches() {

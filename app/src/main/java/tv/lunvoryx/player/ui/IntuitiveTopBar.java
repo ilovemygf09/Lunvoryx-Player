@@ -59,13 +59,14 @@ public final class IntuitiveTopBar extends LinearLayout {
 
     private void init() {
         setOrientation(HORIZONTAL);
+        setBackgroundColor(0xFF051529);
         setGravity(Gravity.CENTER_VERTICAL);
         // 32dp horizontal padding protects against TV overscan / bezel clipping
-        setPadding(dp(context, 32), dp(context, 6), dp(context, 32), dp(context, 6));
+        setPadding(dp(context, 20), dp(context, 6), dp(context, 32), dp(context, 6));
 
         // 1. Brand Logo (LUNVORYX PLAYER) at the very top-left
         ImageView brand = new ImageView(context);
-        brand.setImageResource(R.drawable.brand_header);
+        brand.setImageResource(R.drawable.intu_brand);
         brand.setScaleType(ImageView.ScaleType.FIT_CENTER);
         LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(dp(context, 130), dp(context, 34));
         bp.rightMargin = dp(context, 14);
@@ -143,7 +144,7 @@ public final class IntuitiveTopBar extends LinearLayout {
 
             TextView tabText = new TextView(context);
             tabText.setText(key);
-            tabText.setTextSize(13f);
+            tabText.setTextSize(15f);
             LinearLayout.LayoutParams ttp = new LinearLayout.LayoutParams(-2, -2);
             ttp.leftMargin = dp(context, 6);
             tab.addView(tabText, ttp);
@@ -152,12 +153,10 @@ public final class IntuitiveTopBar extends LinearLayout {
                 v.animate().scaleX(f ? 1.05f : 1.0f).scaleY(f ? 1.05f : 1.0f).setDuration(120).start();
                 boolean isActive = currentSection.equalsIgnoreCase(key);
                 if (isActive) {
-                    tab.setBackground(TvStyle.squircleSolid(context, 16, f ? 0xFF0A84FF : 0xFF007AFF));
+                    tab.setBackground(IntuitivePanel.button(context, f));
                 } else {
-                    if (tab.getBackground() instanceof SquircleGlassDrawable) {
-                        ((SquircleGlassDrawable) tab.getBackground()).setFocused(f);
-                    }
-                    tabIcon.setColor(f ? 0xFFFFFFFF : 0xFFB0B7C3);
+                    tab.setBackground(f ? IntuitivePanel.create(context) : null);
+                    tabIcon.setColor(f ? 0xFFFFFFFF : 0xFFE7F1FF);
                     tabText.setTextColor(f ? 0xFFFFFFFF : 0xFFB0B7C3);
                 }
             });
@@ -179,12 +178,12 @@ public final class IntuitiveTopBar extends LinearLayout {
         for (TabItem t : tabs) {
             boolean isActive = currentSection.equalsIgnoreCase(t.key);
             if (isActive) {
-                t.layout.setBackground(TvStyle.squircleSolid(context, 16, 0xFF007AFF));
+                t.layout.setBackground(IntuitivePanel.button(context, t.layout.isFocused()));
                 t.icon.setColor(0xFFFFFFFF);
                 t.text.setTextColor(0xFFFFFFFF);
                 t.text.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
             } else {
-                t.layout.setBackground(TvStyle.squircleCard(context, 16));
+                t.layout.setBackground(t.layout.isFocused() ? IntuitivePanel.create(context) : null);
                 t.icon.setColor(0xFFB0B7C3);
                 t.text.setTextColor(0xFFB0B7C3);
                 t.text.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -249,7 +248,10 @@ public final class IntuitiveTopBar extends LinearLayout {
         badge.addView(cal, new LinearLayout.LayoutParams(dp(context, 13), dp(context, 13)));
 
         TextView text = new TextView(context);
-        text.setText("Tu lista caduca: 06/05/2027");
+        text.setText("Mis listas");
+        badge.setFocusable(true);
+        badge.setOnFocusChangeListener((v, focused) -> ((SquircleGlassDrawable) badge.getBackground()).setFocused(focused));
+        badge.setOnClickListener(v -> listener.onSectionSelected("Mis listas"));
         text.setTextSize(11f);
         text.setTextColor(0xFF9AAEC4);
         text.setSingleLine(true);

@@ -3,18 +3,33 @@ package tv.lunvoryx.player.ui;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.drawable.BitmapDrawable;
 import android.util.LruCache;
 
-/** Decode fixed UI artwork at display size rather than its export resolution. */
+/** Decode and cache each artwork at the resolution required by its destination. */
 public final class Artwork {
-    private static final LruCache<Integer,Bitmap> CACHE=new LruCache<Integer,Bitmap>(16*1024*1024){
-        @Override protected int sizeOf(Integer key,Bitmap value){return value.getByteCount();}
+    private static final LruCache<String, Bitmap> CACHE = new LruCache<String, Bitmap>(16 * 1024 * 1024) {
+        @Override protected int sizeOf(String key, Bitmap bitmap) {
+            return bitmap.getByteCount();
+        }
     };
-    public static Bitmap get(Context context,int resource,int desiredWidth){
-        Bitmap bitmap=CACHE.get(resource);if(bitmap!=null)return bitmap;
-        BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeResource(context.getResources(),resource,o);
-        o.inSampleSize=1;while(o.outWidth/(o.inSampleSize*2)>=desiredWidth)o.inSampleSize*=2;
-        o.inJustDecodeBounds=false;o.inScaled=false;bitmap=BitmapFactory.decodeResource(context.getResources(),resource,o);CACHE.put(resource,bitmap);return bitmap;
+
+    public static Bitmap get(Context context, int resource, int desiredWidth) {
+        int width = Math.max(1, desiredWidth);
+        String key = resource + "/" + width;
+        Bitmap cached = CACHE.get(key);
+        if (cached != null) return cached;
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inJustDecodeBounds = true;
+        BitmapFactory.decodeResource(context.getResources(), resource, options);
+        options.inSampleSize = 1;
+        while (options.outWidth / (options.inSampleSize * 2) >= width) {
+            options.inSampleSize *= 2;
+        }
+        options.inJustDecodeBounds = false;
+        options.inScaled = false;
+        Bitmap bitmap = BitmapFactory.decodeResource(context.getResources(), resource, options);
+        if (bitmap != null) CACHE.put(key, bitmap);
+        return bitmap;
     }
 }

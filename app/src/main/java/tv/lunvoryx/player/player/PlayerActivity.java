@@ -18,7 +18,6 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -54,10 +53,8 @@ import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.UUID;
 
 import tv.lunvoryx.player.data.Channel;
@@ -117,15 +114,21 @@ public final class PlayerActivity extends Activity {
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
             updateProgress();
-            if (SystemClock.elapsedRealtime() - lastWatchSave >= WATCH_SAVE_INTERVAL) saveWatchProgress();
             handler.postDelayed(this, 1000);
+        }
+    };
+    private final Runnable checkpoint = new Runnable() {
+        @Override public void run() {
+            saveWatchProgress();
+            handler.postDelayed(this, WATCH_SAVE_INTERVAL);
         }
     };
     private List<Channel> channels = Collections.emptyList();
     private String queueToken;
     private int selectedIndex;
     private long resumePosition = C.TIME_UNSET;
-    private long lastWatchSave;
+    private final DateFormat clockFormat = DateFormat.getTimeInstance(DateFormat.SHORT);
+    private long clockMinute = -1;
     private boolean restoringWatchPosition;
     private boolean resumePlaying = true;
     private boolean failed;
@@ -135,6 +138,10 @@ public final class PlayerActivity extends Activity {
     private boolean scrubbing;
     private int resizeMode;
     private ExoPlayer player;
+    private DefaultMediaSourceFactory sources;
+    private String sourceUserAgent, sourceReferer;
+    private Channel sessionChannel;
+    private long sessionDuration = C.TIME_UNSET;
     private PlayerView video;
     private FrameLayout root;
     private LinearLayout topBar;
@@ -377,11 +384,9 @@ public final class PlayerActivity extends Activity {
                     showControls();
                 }
                 updatePause();
-                updateSession();
             }
             @Override public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
                 updatePause();
-                updateSession();
                 if (playWhenReady) scheduleHide();
                 else {
                     handler.removeCallbacks(hideTask);
@@ -390,7 +395,9 @@ public final class PlayerActivity extends Activity {
             }
             @Override public void onIsPlayingChanged(boolean playing) {
                 updatePause();
-                updateSession();
+                handler.removeCallbacks(checkpoint);
+                if (playing && player != null && player.isCurrentMediaItemSeekable() && !player.isCurrentMediaItemLive())
+                    handler.postDelayed(checkpoint, WATCH_SAVE_INTERVAL);
                 if (playing) scheduleHide();
                 else handler.removeCallbacks(hideTask);
             }
@@ -406,7 +413,13 @@ public final class PlayerActivity extends Activity {
                 errorPanel.setVisibility(View.VISIBLE);
                 showControls();
                 retry.requestFocus();
-                updateSession();
+            }
+            @Override public void onEvents(Player source, Player.Events events) {
+                if (events.containsAny(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                        Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_TIMELINE_CHANGED, Player.EVENT_PLAYER_ERROR,
+                        Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                    updateSession();
+                }
             }
             @Override public void onTracksChanged(Tracks tracks) { updateProgress(); }
         });
@@ -417,18 +430,9 @@ public final class PlayerActivity extends Activity {
     private void prepareChannel(long position, boolean play) {
         if (player == null) return;
         Channel channel = current();
-        lastWatchSave = SystemClock.elapsedRealtime();
         failed = false;
         errorPanel.setVisibility(View.GONE);
         waitPanel.setVisibility(View.VISIBLE);
-        DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
-                .setUserAgent(channel.userAgent == null || channel.userAgent.isEmpty() ? "LunvoryxTV/1.0" : channel.userAgent)
-                .setConnectTimeoutMs(15000).setReadTimeoutMs(15000)
-                .setAllowCrossProtocolRedirects(true);
-        Map<String, String> headers = new HashMap<>();
-        if (channel.referer != null && !channel.referer.isEmpty()) headers.put("Referer", channel.referer);
-        http.setDefaultRequestProperties(headers);
-        DefaultMediaSourceFactory sources = new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this, http));
         MediaItem.Builder media = new MediaItem.Builder().setMediaId(channel.id).setUri(channel.url)
                 .setMediaMetadata(new MediaMetadata.Builder().setTitle(channel.name).build());
         Uri uri = Uri.parse(channel.url);
@@ -438,14 +442,28 @@ public final class PlayerActivity extends Activity {
         if (pathLower.endsWith(".m3u8") || "m3u8".equalsIgnoreCase(output)) media.setMimeType(MimeTypes.APPLICATION_M3U8);
         else if (pathLower.endsWith(".mpd")) media.setMimeType(MimeTypes.APPLICATION_MPD);
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon().clearOverrides().build());
-        player.setMediaSource(sources.createMediaSource(media.build()));
-        if (position != C.TIME_UNSET && position >= 0) player.seekTo(position);
+        player.setRepeatMode(channel.url.startsWith("asset:///demo/live/") ? Player.REPEAT_MODE_ONE : Player.REPEAT_MODE_OFF);
+        player.setMediaSource(sourcesFor(channel).createMediaSource(media.build()), position);
         player.prepare();
         player.setPlayWhenReady(play);
         repository.recordPlayed(channel.id);
         updateChannelUi();
         showControls();
-        updateSession();
+    }
+
+    private DefaultMediaSourceFactory sourcesFor(Channel channel) {
+        if (sources == null || !channel.userAgent.equals(sourceUserAgent) || !channel.referer.equals(sourceReferer)) {
+            DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
+                    .setUserAgent(channel.userAgent.isEmpty() ? "LunvoryxTV/1.0" : channel.userAgent)
+                    .setConnectTimeoutMs(15000).setReadTimeoutMs(15000)
+                    .setAllowCrossProtocolRedirects(true);
+            if (!channel.referer.isEmpty())
+                http.setDefaultRequestProperties(Collections.singletonMap("Referer", channel.referer));
+            sources = new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this, http));
+            sourceUserAgent = channel.userAgent;
+            sourceReferer = channel.referer;
+        }
+        return sources;
     }
 
     private void changeChannel(int direction) {
@@ -473,7 +491,6 @@ public final class PlayerActivity extends Activity {
 
     /** Saves only actual, seekable VOD timelines; loading failures preserve the last valid checkpoint. */
     private void saveWatchProgress() {
-        lastWatchSave = SystemClock.elapsedRealtime();
         if (player == null || channels.isEmpty()) return;
         if (player.isCurrentMediaItemLive() || player.getPlaybackState() == Player.STATE_ENDED) {
             clearWatchProgress(current().id);
@@ -491,6 +508,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private void clearWatchProgress(String id) {
+        if (!watchProgress.contains(id + ".position") && !watchProgress.contains(id + ".duration")) return;
         watchProgress.edit().remove(id + ".position").remove(id + ".duration").apply();
     }
 
@@ -572,8 +590,12 @@ public final class PlayerActivity extends Activity {
     }
 
     private void updateProgress() {
-        if (clock == null) return;
-        clock.setText(DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date()));
+        if (topBar == null || topBar.getVisibility() != View.VISIBLE) return;
+        long now = System.currentTimeMillis();
+        if (now / 60000 != clockMinute) {
+            clockMinute = now / 60000;
+            clock.setText(clockFormat.format(new Date(now)));
+        }
         if (player == null) return;
         boolean isLive = player.isCurrentMediaItemLive();
         live.setVisibility(isLive ? View.VISIBLE : View.GONE);
@@ -601,6 +623,8 @@ public final class PlayerActivity extends Activity {
         topBar.setVisibility(View.VISIBLE);
         bottomBar.setVisibility(View.VISIBLE);
         if (hidden && !failed) pause.requestFocus();
+        handler.removeCallbacks(ticker);
+        handler.postDelayed(ticker, 1000);
         updateProgress();
         scheduleHide();
     }
@@ -613,6 +637,7 @@ public final class PlayerActivity extends Activity {
 
     private void hideControls() {
         if (failed || dialogOpen || topBar == null) return;
+        handler.removeCallbacks(ticker);
         topBar.setVisibility(View.GONE);
         bottomBar.setVisibility(View.GONE);
         root.requestFocus();
@@ -786,10 +811,14 @@ public final class PlayerActivity extends Activity {
         if (player.isCurrentMediaItemSeekable()) actions |= PlaybackState.ACTION_SEEK_TO;
         mediaSession.setPlaybackState(new PlaybackState.Builder().setActions(actions)
                 .setState(state, player.getCurrentPosition(), player.isPlaying() ? 1f : 0f).build());
+        long length = player.getDuration();
+        if (sessionChannel == current() && sessionDuration == length) return;
+        sessionChannel = current();
+        sessionDuration = length;
         android.media.MediaMetadata.Builder metadata = new android.media.MediaMetadata.Builder()
                 .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, current().name)
                 .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Lunvoryx Player");
-        if (player.getDuration() != C.TIME_UNSET) metadata.putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, player.getDuration());
+        if (length != C.TIME_UNSET) metadata.putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, length);
         mediaSession.setMetadata(metadata.build());
     }
 
@@ -797,7 +826,6 @@ public final class PlayerActivity extends Activity {
         super.onStart();
         initializePlayer();
         if (mediaSession != null) mediaSession.setActive(true);
-        handler.post(ticker);
     }
 
     @Override protected void onStop() {

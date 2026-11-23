@@ -110,11 +110,7 @@ public final class SeriesParser {
             sub = "Episodio " + episode;
         }
 
-        // Duration estimation: vary slightly around 45-52 min based on episode number for realism
-        int durMins = 42 + ((episode * 7 + season * 3) % 15);
-        String duration = durMins + " min";
-
-        return new ParsedEpisode(cleanSeries, season, episode, displayTitle, sub, duration, year);
+        return new ParsedEpisode(cleanSeries, season, episode, displayTitle, sub, "", year);
     }
 
     public static String cleanSeriesTitle(String text) {
@@ -221,7 +217,6 @@ public final class SeriesParser {
             for (List<EpisodeItem> epList : seasonsMap.values()) {
                 Collections.sort(epList, (a, b) -> Integer.compare(a.episode, b.episode));
             }
-            if (year.isEmpty()) year = "2026";
             return new SeriesItem(seriesTitle, group, logoUrl, year, firstChannel, allChannels, seasonsMap);
         }
     }

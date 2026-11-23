@@ -15,6 +15,7 @@ public final class HomeBackdrop extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final RectF destination = new RectF();
     private LinearGradient sideShade, bottomShade;
+    private LinearGradient intuitiveSky;
     private float artHeight;
     private boolean home = true;
     private boolean intuitive = false;
@@ -42,6 +43,7 @@ public final class HomeBackdrop extends View {
 
     private void updateBounds(int width, int height) {
         if (width <= 0 || height <= 0 || image == null) return;
+        intuitiveSky = new LinearGradient(0, 0, width, height, new int[]{0xFF021026, 0xFF081D39, 0xFF061125, 0xFF192354}, null, Shader.TileMode.CLAMP);
         artHeight = height * .68f;
         float left = intuitive ? 0 : width * .15f;
         float scale = Math.max((width - left) / image.getWidth(), artHeight / image.getHeight());
@@ -63,6 +65,13 @@ public final class HomeBackdrop extends View {
 
     @Override protected void onDraw(Canvas c) {
         c.drawColor(intuitive ? 0xFF060A14 : TvStyle.BG);
+        if (intuitive && intuitiveSky != null) {
+            paint.setShader(intuitiveSky);
+            paint.setAlpha(255);
+            c.drawPaint(paint);
+            paint.setShader(null);
+            return;
+        }
         float w = getWidth();
         paint.setShader(null);
         paint.setAlpha(home ? 255 : 60);

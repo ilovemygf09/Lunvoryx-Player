@@ -37,14 +37,27 @@ public final class LogoLoader {
     static {IO.allowCoreThreadTimeOut(true);}
 
     public static void load(String url,ImageView view){
-        Object previous=view.getTag();
-        if(previous instanceof Request)((Request)previous).cancelled=true;
-        view.setTag(null);view.setImageDrawable(null);
+        load(url, view, 256);
+    }
+
+    static void load(String url, ImageView view, int maxSize){
+        clear(view);
         if(url==null||(!url.regionMatches(true,0,"https://",0,8)&&!url.regionMatches(true,0,"http://",0,7))) return;
-        Request request=new Request(url,view);view.setTag(request);
-        Bitmap cached=CACHE.get(url); if(cached!=null){view.setImageBitmap(cached);return;}
+        Request request=new Request(url,view,maxSize);view.setTag(request);
+        Bitmap cached=CACHE.get(request.key); if(cached!=null){view.setImageBitmap(cached);return;}
         if(recentlyFailed(url))return;
         IO.execute(request);
+    }
+
+    public static void clear(ImageView view) {
+        Object previous = view.getTag();
+        if (previous instanceof Request) {
+            Request request = (Request) previous;
+            request.cancelled = true;
+            PENDING.remove(request);
+        }
+        view.setTag(null);
+        view.setImageDrawable(null);
     }
 
     private static boolean recentlyFailed(String url){
@@ -53,13 +66,13 @@ public final class LogoLoader {
     }
 
     private static final class Request implements Runnable {
-        final String url;
+        final String url, key;
+        final int maxSize;
         final WeakReference<ImageView> target;
         volatile boolean cancelled;
-        Request(String url,ImageView view){this.url=url;target=new WeakReference<>(view);}
+        Request(String url,ImageView view,int maxSize){this.url=url;this.maxSize=maxSize;this.key=maxSize+"|"+url;target=new WeakReference<>(view);}
 
-        // The tag is only an identity token. No layout, attachment or drawing properties are read off-thread.
-        private boolean current(){ImageView view=target.get();return !cancelled&&view!=null&&view.getTag()==this;}
+        private boolean current(){return !cancelled && target.get()!=null;}
         private void deliver(Bitmap bitmap){
             MAIN.post(()->{ImageView view=target.get();if(!cancelled&&view!=null&&view.getTag()==this)view.setImageBitmap(bitmap);});
         }
@@ -67,7 +80,7 @@ public final class LogoLoader {
 
         @Override public void run(){
             if(!current())return;
-            Bitmap cached=CACHE.get(url);if(cached!=null){deliver(cached);return;}
+            Bitmap cached=CACHE.get(key);if(cached!=null){deliver(cached);return;}
             if(recentlyFailed(url))return;
             HttpURLConnection connection=null;
             try{
@@ -86,9 +99,9 @@ public final class LogoLoader {
                 if(!current())return;
                 byte[] data=out.toByteArray();BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(data,0,data.length,o);
                 if(o.outWidth<=0||o.outHeight<=0){fail();return;}
-                o.inSampleSize=1;while(o.outWidth/o.inSampleSize>256||o.outHeight/o.inSampleSize>256)o.inSampleSize*=2;
+                o.inSampleSize=1;while(o.outWidth/o.inSampleSize>maxSize||o.outHeight/o.inSampleSize>maxSize)o.inSampleSize*=2;
                 o.inJustDecodeBounds=false;Bitmap b=BitmapFactory.decodeByteArray(data,0,data.length,o);
-                if(b!=null){CACHE.put(url,b);FAILURES.remove(url);deliver(b);}else fail();
+                if(b!=null){CACHE.put(key,b);FAILURES.remove(url);deliver(b);}else fail();
             }catch(Exception ignored){if(!cancelled)fail();}finally{if(connection!=null)connection.disconnect();}
         }
     }

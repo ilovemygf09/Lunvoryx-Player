@@ -8,10 +8,11 @@ import android.view.View;
 
 /** Consistent 24-unit outlined icons, drawn sharply at the TV's actual density. */
 public final class LineIcon extends View {
-    private final String kind;
+    private String kind;
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private int color=TvStyle.TEXT;
     public LineIcon(Context c,String kind){super(c);this.kind=kind;setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);}
+    void setKind(String value) { if (!kind.equals(value)) { kind = value; invalidate(); } }
     public void setColor(int value){color=value;invalidate();}
     private void line(Canvas c,float... points){Path p=new Path();p.moveTo(points[0],points[1]);for(int i=2;i<points.length;i+=2)p.lineTo(points[i],points[i+1]);c.drawPath(p,paint);}
     @Override protected void onDraw(Canvas canvas){

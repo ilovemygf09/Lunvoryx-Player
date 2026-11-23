@@ -1,7 +1,6 @@
 package tv.lunvoryx.player.ui;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
@@ -13,27 +12,19 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import java.util.HashSet;
 import tv.lunvoryx.player.R;
 import tv.lunvoryx.player.data.Channel;
-import tv.lunvoryx.player.data.MediaKind;
 import tv.lunvoryx.player.data.PlaylistRepository;
 import tv.lunvoryx.player.data.SeriesItem;
-import tv.lunvoryx.player.data.SeriesParser;
 import tv.lunvoryx.player.tmdb.TmdbClient;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 import static tv.lunvoryx.player.ui.TvStyle.dp;
 
 public final class MediaBrowseView extends LinearLayout {
@@ -46,32 +37,18 @@ public final class MediaBrowseView extends LinearLayout {
         default void onOpenSeriesDetails(SeriesItem series) {}
     }
 
-    private static class CategoryItem {
-        final String id;
-        final String label;
-        final String icon;
-        int count;
-        CategoryItem(String id, String label, String icon, int count) {
-            this.id = id;
-            this.label = label;
-            this.icon = icon;
-            this.count = count;
-        }
-    }
-
     private final Context context;
     private final PlaylistRepository repository;
     private final boolean isMovies;
     private final Listener listener;
     private final boolean isIntuitive;
 
-    private final List<Channel> fullItems = new ArrayList<>();
-    private final List<CategoryItem> categories = new ArrayList<>();
-    private final List<Channel> filteredItems = new ArrayList<>();
+    private final CatalogTask browseTask = new CatalogTask();
+    private boolean categoriesLoaded;
+    private List<Channel> filteredItems = Collections.emptyList();
 
     // Series items (grouped 1 per series)
-    private final List<SeriesItem> fullSeries = new ArrayList<>();
-    private final List<SeriesItem> filteredSeries = new ArrayList<>();
+    private List<SeriesItem> filteredSeries = Collections.emptyList();
 
     private String selectedCatId = "all";
     private String selectedCatLabel = "Todas";
@@ -79,7 +56,7 @@ public final class MediaBrowseView extends LinearLayout {
     private int sortMode = 0; // 0: Añadidos (default), 1: A-Z, 2: Z-A
 
     // UI elements
-    private LinearLayout categoriesContainer;
+    private CategoryList categoryList;
     private TextView catHeaderTitle;
     private TextView catHeaderBadge;
     private RecyclerView posterGrid;
@@ -101,7 +78,7 @@ public final class MediaBrowseView extends LinearLayout {
 
     private Channel currentSelectedChannel;
     private SeriesItem currentSelectedSeries;
-    private final Map<String, TmdbClient.Details> tmdbCache = new HashMap<>();
+    private final PreviewMetadata metadata = new PreviewMetadata();
 
     public MediaBrowseView(Context context, PlaylistRepository repository, boolean isMovies, Listener listener) {
         this(context, repository, isMovies, listener, false);
@@ -116,18 +93,20 @@ public final class MediaBrowseView extends LinearLayout {
         this.isIntuitive = isIntuitive;
 
         initUI();
-        loadData();
     }
 
     private void initUI() {
         setOrientation(HORIZONTAL);
-        setBackgroundColor(0xFF060A14);
+        if (isIntuitive) setPadding(dp(context, 10), dp(context, 12), dp(context, 10), dp(context, 14));
+        else setBackgroundColor(0xFF060A14);
 
         int leftW = isIntuitive ? dp(context, 260) : dp(context, 240);
-        addView(buildCategoriesColumn(), new LayoutParams(leftW, -1));
+        LayoutParams categories = isIntuitive ? new LayoutParams(0, -1, .27f) : new LayoutParams(leftW, -1);
+        if (isIntuitive) categories.rightMargin = dp(context, 10);
+        addView(buildCategoriesColumn(), categories);
 
         if (isIntuitive) {
-            addView(buildGridColumn(), new LayoutParams(0, -1, 1.0f));
+            addView(buildGridColumn(), new LayoutParams(0, -1, .73f));
         } else {
             addView(buildGridColumn(), new LayoutParams(0, -1, 0.62f));
             addView(buildPreviewColumn(), new LayoutParams(0, -1, 0.38f));
@@ -137,7 +116,7 @@ public final class MediaBrowseView extends LinearLayout {
     private View buildCategoriesColumn() {
         LinearLayout col = new LinearLayout(context);
         col.setOrientation(VERTICAL);
-        col.setBackground(TvStyle.squircleCard(context, 16));
+        col.setBackground(isIntuitive ? IntuitivePanel.create(context) : TvStyle.squircleCard(context, 16));
         col.setPadding(dp(context, 12), dp(context, 16), dp(context, 12), dp(context, 16));
 
         TextView heading = new TextView(context);
@@ -148,12 +127,12 @@ public final class MediaBrowseView extends LinearLayout {
         heading.setPadding(dp(context, 8), 0, 0, dp(context, 12));
         col.addView(heading);
 
-        ScrollView scroller = new ScrollView(context);
-        scroller.setVerticalScrollBarEnabled(false);
-        categoriesContainer = new LinearLayout(context);
-        categoriesContainer.setOrientation(VERTICAL);
-        scroller.addView(categoriesContainer, new LayoutParams(-1, -2));
-        col.addView(scroller, new LayoutParams(-1, 0, 1));
+        categoryList = new CategoryList(context, this::applyCategoryRowStyle, item -> {
+            selectedCatId = item.id;
+            selectedCatLabel = item.label;
+            applyFilterAndSort();
+        });
+        col.addView(categoryList, new LayoutParams(-1, 0, 1));
 
         return col;
     }
@@ -163,23 +142,28 @@ public final class MediaBrowseView extends LinearLayout {
         col.setOrientation(VERTICAL);
         col.setPadding(dp(context, 16), dp(context, 8), dp(context, 16), dp(context, 8));
 
+        if (isIntuitive) col.setBackground(IntuitivePanel.create(context));
+
         // Subheader: Folder icon, Category Title, Count Badge, Search Box, Sort Dropdown
         LinearLayout subHeader = new LinearLayout(context);
         subHeader.setOrientation(HORIZONTAL);
         subHeader.setGravity(Gravity.CENTER_VERTICAL);
         subHeader.setPadding(0, 0, 0, dp(context, 12));
 
-        LineIcon folderIcon = new LineIcon(context, isMovies ? "movies" : "series");
+        LineIcon folderIcon = new LineIcon(context, isMovies ? "movie" : "series");
         folderIcon.setColor(0xFF007AFF);
         subHeader.addView(folderIcon, new LayoutParams(dp(context, 20), dp(context, 20)));
 
         catHeaderTitle = new TextView(context);
         catHeaderTitle.setText(selectedCatLabel);
-        catHeaderTitle.setTextSize(16);
+        catHeaderTitle.setTextSize(isIntuitive ? 20 : 16);
+        catHeaderTitle.setSingleLine(true);
+        catHeaderTitle.setEllipsize(TextUtils.TruncateAt.END);
         catHeaderTitle.setTextColor(0xFFFFFFFF);
         catHeaderTitle.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         catHeaderTitle.setPadding(dp(context, 8), 0, dp(context, 8), 0);
-        subHeader.addView(catHeaderTitle);
+        if (isIntuitive) subHeader.addView(catHeaderTitle, new LayoutParams(0, -2, 1));
+        else subHeader.addView(catHeaderTitle);
 
         catHeaderBadge = new TextView(context);
         catHeaderBadge.setText("0 " + (isMovies ? "películas" : "series"));
@@ -190,7 +174,7 @@ public final class MediaBrowseView extends LinearLayout {
         subHeader.addView(catHeaderBadge);
 
         View spacer = new View(context);
-        subHeader.addView(spacer, new LayoutParams(0, 1, 1));
+        if (!isIntuitive) subHeader.addView(spacer, new LayoutParams(0, 1, 1));
 
         // Search Bar in Subheader
         FrameLayout searchCard = new FrameLayout(context);
@@ -220,9 +204,11 @@ public final class MediaBrowseView extends LinearLayout {
             }
             @Override public void afterTextChanged(android.text.Editable s) {}
         });
-        searchInner.addView(searchEdit, new LayoutParams(dp(context, 160), -2));
+        searchInner.addView(searchEdit, new LayoutParams(isIntuitive ? -1 : dp(context, 160), -2));
         searchCard.addView(searchInner);
-        subHeader.addView(searchCard);
+        LinearLayout tools = isIntuitive ? new LinearLayout(context) : subHeader;
+        if (isIntuitive) tools.addView(searchCard, new LayoutParams(0, -2, 1));
+        else tools.addView(searchCard);
 
         // Sort Pill / Button
         TextView sortBtn = new TextView(context);
@@ -245,9 +231,13 @@ public final class MediaBrowseView extends LinearLayout {
         });
         LayoutParams sbp = new LayoutParams(-2, -2);
         sbp.leftMargin = dp(context, 10);
-        subHeader.addView(sortBtn, sbp);
+        tools.addView(sortBtn, sbp);
 
         col.addView(subHeader);
+        if (isIntuitive) {
+            tools.setPadding(0, 0, 0, dp(context, 6));
+            col.addView(tools);
+        }
 
         FrameLayout gridContainer = new FrameLayout(context);
 
@@ -274,7 +264,7 @@ public final class MediaBrowseView extends LinearLayout {
         loadingLayout.addView(spinner, new LayoutParams(dp(context, 48), dp(context, 48)));
 
         loadingText = new TextView(context);
-        loadingText.setText(AppStrings.isEnglish(context) ? "Loading series…" : "Cargando catálogo de series…");
+        loadingText.setText(AppStrings.isEnglish(context) ? "Loading catalog…" : "Cargando catálogo…");
         loadingText.setTextSize(14);
         loadingText.setTextColor(0xFF8FA5C2);
         loadingText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
@@ -419,178 +409,58 @@ public final class MediaBrowseView extends LinearLayout {
         return row;
     }
 
+    private boolean focusFirstWhenReady;
+    private View entryFocus;
+
     public void requestFocusFirstItem() {
-        post(() -> {
-            if (posterGrid != null) {
-                View first = posterGrid.getChildAt(0);
-                if (first != null) first.requestFocus();
-                else posterGrid.requestFocus();
-            }
-        });
+        focusFirstWhenReady = true;
+        entryFocus = getRootView().findFocus();
+        if (categoriesLoaded) focusFirstAfterLayout();
     }
 
-    private void loadData() {
-        if (isMovies) {
-            if (loadingLayout != null) loadingLayout.setVisibility(GONE);
-            if (posterGrid != null) posterGrid.setVisibility(VISIBLE);
-            fullItems.clear();
-            fullItems.addAll(repository.getMovieChannels());
-            buildCategoryList();
-            renderCategories();
-            applyFilterAndSort();
-        } else {
-            List<SeriesItem> cached = repository.peekGroupedSeries();
-            if (cached != null) {
-                if (loadingLayout != null) loadingLayout.setVisibility(GONE);
-                if (posterGrid != null) posterGrid.setVisibility(VISIBLE);
-                fullSeries.clear();
-                fullSeries.addAll(cached);
-                buildCategoryList();
-                renderCategories();
-                applyFilterAndSort();
-            } else {
-                if (loadingLayout != null) loadingLayout.setVisibility(VISIBLE);
-                if (posterGrid != null) posterGrid.setVisibility(GONE);
-                if (catHeaderBadge != null) catHeaderBadge.setText(AppStrings.isEnglish(context) ? "Loading…" : "Cargando…");
-                repository.loadGroupedSeriesAsync(seriesList -> {
-                    if (loadingLayout != null) loadingLayout.setVisibility(GONE);
-                    if (posterGrid != null) posterGrid.setVisibility(VISIBLE);
-                    fullSeries.clear();
-                    fullSeries.addAll(seriesList);
-                    buildCategoryList();
-                    renderCategories();
-                    applyFilterAndSort();
-                    requestFocusFirstItem();
-                });
-            }
-        }
+    private void focusFirstAfterLayout() {
+        if (!focusFirstWhenReady) return;
+        focusFirstWhenReady = false;
+        View originalFocus = entryFocus;
+        entryFocus = null;
+        CategoryList.focusFirstAfterLayout(posterGrid, originalFocus);
     }
 
-    private void buildCategoryList() {
-        categories.clear();
-        Set<String> favIds = repository.getFavoriteIds();
-        Set<String> recentIds = new HashSet<>(repository.getRecentIds());
-
-        if (isMovies) {
-            // 1. Todas
-            categories.add(new CategoryItem("all", AppStrings.isEnglish(context) ? "All" : "Todas", "all_grid", fullItems.size()));
-
-            // 2. Favoritos
-            int favCount = 0;
-            for (Channel c : fullItems) if (favIds.contains(c.id)) favCount++;
-            categories.add(new CategoryItem("favorites", AppStrings.isEnglish(context) ? "Favorites" : "Favoritos", "star", favCount));
-
-            // 3. Seguir viendo (Reanudar para ver)
-            int resumeCount = 0;
-            for (Channel c : fullItems) if (recentIds.contains(c.id)) resumeCount++;
-            categories.add(new CategoryItem("resume", AppStrings.isEnglish(context) ? "Keep watching" : "Seguir viendo", "resume", resumeCount));
-
-            // Group counts from playlist
-            Map<String, Integer> groupCounts = new HashMap<>();
-            for (Channel c : fullItems) {
-                String g = (c.group == null || c.group.trim().isEmpty()) ? "General" : c.group.trim();
-                Integer cnt = groupCounts.get(g);
-                groupCounts.put(g, (cnt != null ? cnt : 0) + 1);
-            }
-
-            TreeSet<String> sortedGroups = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-            sortedGroups.addAll(groupCounts.keySet());
-
-            for (String g : sortedGroups) {
-                categories.add(new CategoryItem("group:" + g, g, "folder", groupCounts.get(g)));
-            }
-        } else {
-            // 1. Todas (Series count)
-            categories.add(new CategoryItem("all", AppStrings.isEnglish(context) ? "All" : "Todas", "all_grid", fullSeries.size()));
-
-            // 2. Favoritos
-            int favCount = 0;
-            for (SeriesItem s : fullSeries) if (s.isFavorite(favIds)) favCount++;
-            categories.add(new CategoryItem("favorites", AppStrings.isEnglish(context) ? "Favorites" : "Favoritos", "star", favCount));
-
-            // 3. Seguir viendo
-            int resumeCount = 0;
-            for (SeriesItem s : fullSeries) if (s.hasRecent(recentIds)) resumeCount++;
-            categories.add(new CategoryItem("resume", AppStrings.isEnglish(context) ? "Keep watching" : "Seguir viendo", "resume", resumeCount));
-
-            // Group counts from playlist
-            Map<String, Integer> groupCounts = new HashMap<>();
-            for (SeriesItem s : fullSeries) {
-                String g = (s.group == null || s.group.trim().isEmpty()) ? "General" : s.group.trim();
-                Integer cnt = groupCounts.get(g);
-                groupCounts.put(g, (cnt != null ? cnt : 0) + 1);
-            }
-
-            TreeSet<String> sortedGroups = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-            sortedGroups.addAll(groupCounts.keySet());
-
-            for (String g : sortedGroups) {
-                categories.add(new CategoryItem("group:" + g, g, "folder", groupCounts.get(g)));
-            }
-        }
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        applyFilterAndSort();
     }
 
-    private void renderCategories() {
-        categoriesContainer.removeAllViews();
-        for (CategoryItem item : categories) {
-            LinearLayout row = new LinearLayout(context);
-            row.setOrientation(HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8));
-            row.setFocusable(true);
-            row.setClickable(true);
+    @Override protected void onDetachedFromWindow() {
+        browseTask.cancel();
+        metadata.cancel();
+        super.onDetachedFromWindow();
+    }
 
-            LineIcon icon = new LineIcon(context, item.icon);
-            row.addView(icon, new LayoutParams(dp(context, 16), dp(context, 16)));
-
-            TextView label = new TextView(context);
-            label.setText(item.label);
-            label.setTextSize(12);
-            label.setSingleLine(true);
-            label.setEllipsize(TextUtils.TruncateAt.END);
-            label.setPadding(dp(context, 8), 0, dp(context, 6), 0);
-            row.addView(label, new LayoutParams(0, -2, 1));
-
-            TextView count = new TextView(context);
-            count.setText(String.valueOf(item.count));
-            count.setTextSize(10);
-            count.setPadding(dp(context, 6), dp(context, 2), dp(context, 6), dp(context, 2));
-            GradientDrawable cbg = new GradientDrawable();
-            cbg.setColor(0xFF282A3A);
-            cbg.setCornerRadius(dp(context, 10));
-            count.setBackground(cbg);
-            row.addView(count);
-
-            boolean isSelected = selectedCatId.equals(item.id);
-            applyCategoryRowStyle(row, icon, label, count, isSelected, false);
-
-            row.setOnClickListener(v -> {
-                selectedCatId = item.id;
-                selectedCatLabel = item.label;
-                renderCategories();
-                applyFilterAndSort();
-            });
-
-            row.setOnFocusChangeListener((v, focused) -> {
-                applyCategoryRowStyle(row, icon, label, count, selectedCatId.equals(item.id), focused);
-            });
-
-            LayoutParams lp = new LayoutParams(-1, -2);
-            lp.bottomMargin = dp(context, 4);
-            categoriesContainer.addView(row, lp);
+    private void showCategoryCounts(BrowseFilter.Counts counts) {
+        List<CategoryList.Item> categories = new ArrayList<>(counts.groups.size() + 3);
+        boolean english = AppStrings.isEnglish(context);
+        categories.add(new CategoryList.Item("all", english ? "All" : "Todas", "all_grid", counts.total));
+        categories.add(new CategoryList.Item("favorites", english ? "Favorites" : "Favoritos", "star", counts.favorites));
+        categories.add(new CategoryList.Item("resume", english ? "Keep watching" : "Seguir viendo", "resume", counts.recent));
+        for (Map.Entry<String, Integer> entry : counts.groups.entrySet()) {
+            String group = entry.getKey();
+            categories.add(new CategoryList.Item("group:" + group, group, "folder", entry.getValue()));
         }
+        categoryList.show(categories, selectedCatId);
+        categoriesLoaded = true;
     }
 
     private void applyCategoryRowStyle(LinearLayout row, LineIcon icon, TextView label, TextView count, boolean selected, boolean focused) {
         if (isIntuitive) {
             if (selected || focused) {
-                row.setBackground(TvStyle.squircleSolid(context, 12, selected ? 0xFF007AFF : 0xFF1E2D4A));
+                row.setBackground(selected ? IntuitivePanel.button(context, focused) : IntuitivePanel.create(context));
                 icon.setColor(0xFFFFFFFF);
                 label.setTextColor(0xFFFFFFFF);
                 label.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
                 count.setTextColor(0xFFFFFFFF);
             } else {
-                row.setBackground(null);
+                row.setBackground(IntuitivePanel.create(context));
                 icon.setColor(0xFF8F91A2);
                 label.setTextColor(0xFFCACBD4);
                 label.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
@@ -614,74 +484,43 @@ public final class MediaBrowseView extends LinearLayout {
     }
 
     private void applyFilterAndSort() {
-        if (isMovies) {
-            filteredItems.clear();
-            Set<String> favIds = repository.getFavoriteIds();
-            List<String> recents = repository.getRecentIds();
-
-            for (Channel c : fullItems) {
-                if ("favorites".equals(selectedCatId) && !favIds.contains(c.id)) continue;
-                if ("resume".equals(selectedCatId) && !recents.contains(c.id)) continue;
-                if (selectedCatId.startsWith("group:")) {
-                    String groupName = selectedCatId.substring(6);
-                    if (!groupName.equalsIgnoreCase(c.group)) continue;
-                }
-                if (!searchQuery.isEmpty()) {
-                    String q = searchQuery.toLowerCase(Locale.ROOT);
-                    if (!c.name.toLowerCase(Locale.ROOT).contains(q)) continue;
-                }
-                filteredItems.add(c);
-            }
-
-            if (sortMode == 1) {
-                Collections.sort(filteredItems, (a, b) -> a.name.compareToIgnoreCase(b.name));
-            } else if (sortMode == 2) {
-                Collections.sort(filteredItems, (a, b) -> b.name.compareToIgnoreCase(a.name));
-            }
-
-            catHeaderTitle.setText(selectedCatLabel);
-            catHeaderBadge.setText(String.valueOf(filteredItems.size()) + (AppStrings.isEnglish(context) ? " movies" : " películas"));
-            posterAdapter.notifyDataSetChanged();
-
-            if (!filteredItems.isEmpty()) {
-                selectForPreview(filteredItems.get(0));
-            } else {
-                clearPreview();
-            }
-        } else {
-            filteredSeries.clear();
-            Set<String> favIds = repository.getFavoriteIds();
-            Set<String> recentIds = new HashSet<>(repository.getRecentIds());
-            for (SeriesItem s : fullSeries) {
-                if ("favorites".equals(selectedCatId) && !s.isFavorite(favIds)) continue;
-                if ("resume".equals(selectedCatId) && !s.hasRecent(recentIds)) continue;
-                if (selectedCatId.startsWith("group:")) {
-                    String groupName = selectedCatId.substring(6);
-                    if (!groupName.equalsIgnoreCase(s.group)) continue;
-                }
-                if (!searchQuery.isEmpty()) {
-                    String q = searchQuery.toLowerCase(Locale.ROOT);
-                    if (!s.seriesTitle.toLowerCase(Locale.ROOT).contains(q)) continue;
-                }
-                filteredSeries.add(s);
-            }
-
-            if (sortMode == 1) {
-                Collections.sort(filteredSeries, (a, b) -> a.seriesTitle.compareToIgnoreCase(b.seriesTitle));
-            } else if (sortMode == 2) {
-                Collections.sort(filteredSeries, (a, b) -> b.seriesTitle.compareToIgnoreCase(a.seriesTitle));
-            }
-
-            catHeaderTitle.setText(selectedCatLabel);
-            catHeaderBadge.setText(String.valueOf(filteredSeries.size()) + (AppStrings.isEnglish(context) ? " series" : " series"));
-            posterAdapter.notifyDataSetChanged();
-
-            if (!filteredSeries.isEmpty()) {
-                selectForPreviewSeries(filteredSeries.get(0));
-            } else {
-                clearPreview();
-            }
+        String category = selectedCatId, query = searchQuery;
+        int sort = sortMode;
+        boolean initial = !categoriesLoaded;
+        boolean english = AppStrings.isEnglish(context);
+        catHeaderBadge.setText(english ? "Loading…" : "Cargando…");
+        if (initial) {
+            loadingLayout.setVisibility(VISIBLE);
+            posterGrid.setVisibility(GONE);
         }
+        if (isMovies) {
+            browseTask.submit(() -> BrowseFilter.CHANNELS.run(repository.getMovieChannels(), repository,
+                    category, query, sort, initial), result -> {
+                filteredItems = result.items;
+                finishFilter(result.counts, filteredItems.size(), english ? " movies" : " películas");
+                if (filteredItems.isEmpty()) clearPreview();
+                else selectForPreview(filteredItems.get(0));
+            });
+        } else {
+            browseTask.submit(() -> BrowseFilter.SERIES.run(repository.getGroupedSeries(), repository,
+                    category, query, sort, initial), result -> {
+                filteredSeries = result.items;
+                finishFilter(result.counts, filteredSeries.size(), " series");
+                if (filteredSeries.isEmpty()) clearPreview();
+                else selectForPreviewSeries(filteredSeries.get(0));
+            });
+        }
+    }
+
+    private void finishFilter(BrowseFilter.Counts counts, int size, String unit) {
+        if (counts != null) showCategoryCounts(counts);
+        loadingLayout.setVisibility(GONE);
+        posterGrid.setVisibility(VISIBLE);
+        catHeaderTitle.setText(selectedCatLabel);
+        catHeaderBadge.setText(size + unit);
+        posterAdapter.notifyDataSetChanged();
+        if (counts != null && isIntuitive && (getRootView().findFocus() == null || posterGrid.hasFocus()))
+            requestFocusFirstItem();
     }
 
     private void selectForPreview(Channel c) {
@@ -692,15 +531,15 @@ public final class MediaBrowseView extends LinearLayout {
 
         String year = extractYear(c.name);
         if (previewMeta != null) {
-            previewMeta.setText((year.isEmpty() ? "2026" : year) + "  •  " + (c.group.isEmpty() ? "Película" : c.group));
+            previewMeta.setText((year.isEmpty() ? "" : year + "  •  ") + (c.group.isEmpty() ? "Película" : c.group));
         }
         if (previewOverview != null) {
             previewOverview.setText(AppStrings.isEnglish(context) ? "Available in your local library." : "Disponible en tu biblioteca local.");
         }
         if (previewDirector != null) previewDirector.setText("—");
         if (previewCast != null) previewCast.setText("—");
-        if (previewAudio != null) previewAudio.setText("Español / Original");
-        if (previewSubtitles != null) previewSubtitles.setText("Español, Inglés");
+        if (previewAudio != null) previewAudio.setText("—");
+        if (previewSubtitles != null) previewSubtitles.setText("—");
 
         updateFavButtonState();
 
@@ -708,13 +547,12 @@ public final class MediaBrowseView extends LinearLayout {
             if (!c.logoUrl.isEmpty()) {
                 LogoLoader.load(c.logoUrl, previewPoster);
             } else {
+                LogoLoader.clear(previewPoster);
                 previewPoster.setImageBitmap(Artwork.get(context, R.drawable.category_movies, 400));
             }
         }
 
-        if (TmdbClient.hasApiKey(context)) {
-            fetchTmdbData(c);
-        }
+        metadata.load(context, c.name, true, this::applyTmdbDetails);
     }
 
     private void selectForPreviewSeries(SeriesItem s) {
@@ -725,15 +563,15 @@ public final class MediaBrowseView extends LinearLayout {
 
         int sc = s.getSeasonCount();
         if (previewMeta != null) {
-            previewMeta.setText(s.year + "  •  " + sc + (sc == 1 ? " temporada" : " temporadas") + "  •  " + (s.group.isEmpty() ? "Serie" : s.group));
+            previewMeta.setText((s.year.isEmpty() ? "" : s.year + "  •  ") + sc + (sc == 1 ? " temporada" : " temporadas") + "  •  " + (s.group.isEmpty() ? "Serie" : s.group));
         }
         if (previewOverview != null) {
             previewOverview.setText(AppStrings.isEnglish(context) ? "Available in your local library." : "Disponible en tu biblioteca local.");
         }
         if (previewDirector != null) previewDirector.setText("—");
         if (previewCast != null) previewCast.setText("—");
-        if (previewAudio != null) previewAudio.setText("Español / Original");
-        if (previewSubtitles != null) previewSubtitles.setText("Español, Inglés");
+        if (previewAudio != null) previewAudio.setText("—");
+        if (previewSubtitles != null) previewSubtitles.setText("—");
 
         updateFavButtonState();
 
@@ -741,52 +579,12 @@ public final class MediaBrowseView extends LinearLayout {
             if (!s.logoUrl.isEmpty()) {
                 LogoLoader.load(s.logoUrl, previewPoster);
             } else {
+                LogoLoader.clear(previewPoster);
                 previewPoster.setImageBitmap(Artwork.get(context, R.drawable.category_series, 400));
             }
         }
 
-        if (TmdbClient.hasApiKey(context)) {
-            fetchTmdbDataForSeries(s);
-        }
-    }
-
-    private void fetchTmdbData(Channel c) {
-        if (tmdbCache.containsKey(c.id)) {
-            applyTmdbDetails(tmdbCache.get(c.id));
-            return;
-        }
-
-        new Thread(() -> {
-            TmdbClient.Details d = TmdbClient.searchAndGetDetails(context, c.name, true, AppStrings.getLang(context));
-            if (d != null) {
-                tmdbCache.put(c.id, d);
-                post(() -> {
-                    if (currentSelectedChannel == c) {
-                        applyTmdbDetails(d);
-                    }
-                });
-            }
-        }).start();
-    }
-
-    private void fetchTmdbDataForSeries(SeriesItem s) {
-        String cacheKey = "series:" + s.seriesTitle;
-        if (tmdbCache.containsKey(cacheKey)) {
-            applyTmdbDetails(tmdbCache.get(cacheKey));
-            return;
-        }
-
-        new Thread(() -> {
-            TmdbClient.Details d = TmdbClient.searchAndGetDetails(context, s.seriesTitle, false, AppStrings.getLang(context));
-            if (d != null) {
-                tmdbCache.put(cacheKey, d);
-                post(() -> {
-                    if (currentSelectedSeries == s) {
-                        applyTmdbDetails(d);
-                    }
-                });
-            }
-        }).start();
+        metadata.load(context, s.seriesTitle, false, this::applyTmdbDetails);
     }
 
     private void applyTmdbDetails(TmdbClient.Details d) {
@@ -821,18 +619,21 @@ public final class MediaBrowseView extends LinearLayout {
     }
 
     private void clearPreview() {
+        metadata.cancel();
         currentSelectedChannel = null;
         currentSelectedSeries = null;
         if (previewTitle == null) return;
         previewTitle.setText("");
         if (previewMeta != null) previewMeta.setText("");
         if (previewOverview != null) previewOverview.setText(AppStrings.isEnglish(context) ? "No content found in this category." : "No hay contenido en esta categoría.");
-        if (previewPoster != null) previewPoster.setImageDrawable(null);
+        if (previewPoster != null) LogoLoader.clear(previewPoster);
     }
+
+    private static final java.util.regex.Pattern YEAR = java.util.regex.Pattern.compile("(19\\d\\d|20\\d\\d)");
 
     private static String extractYear(String text) {
         if (text == null) return "";
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(19\\d\\d|20\\d\\d)").matcher(text);
+        java.util.regex.Matcher m = YEAR.matcher(text);
         if (m.find()) return m.group(1);
         return "";
     }
@@ -893,16 +694,19 @@ public final class MediaBrowseView extends LinearLayout {
 
             SquircleGlassDrawable cardBg = TvStyle.squircleCard(context, 12);
             card.setBackground(cardBg);
-            card.setClipToOutline(true);
+            if (isIntuitive) IntuitivePanel.outline(card, 8);
+            else card.setClipToOutline(true);
 
             posterImage = new ImageView(context);
             posterImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            card.addView(posterImage, new FrameLayout.LayoutParams(-1, -1));
+            FrameLayout.LayoutParams art = new FrameLayout.LayoutParams(-1, -1);
+            if (isIntuitive) art.bottomMargin = dp(context, 32);
+            card.addView(posterImage, art);
 
             View shade = new View(context);
             GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x00000000, 0xEE0B0D18});
             shade.setBackground(g);
-            card.addView(shade, new FrameLayout.LayoutParams(-1, -1));
+            if (!isIntuitive) card.addView(shade, new FrameLayout.LayoutParams(-1, -1));
 
             initialsText = new TextView(context);
             initialsText.setTextSize(22);
@@ -946,6 +750,7 @@ public final class MediaBrowseView extends LinearLayout {
                     else if (item != null) selectForPreview(item);
                 }
                 if (isIntuitive) {
+                    IntuitivePanel.focusRing(card, hasFocus);
                     cardBg.setCustomStroke(hasFocus ? 0xFF00BFFF : 0x22FFFFFF, hasFocus ? 2.0f : 1.0f);
                 }
                 cardBg.setFocused(hasFocus);
@@ -970,9 +775,11 @@ public final class MediaBrowseView extends LinearLayout {
                 initialsText.setVisibility(GONE);
                 LogoLoader.load(c.logoUrl, posterImage);
             } else {
-                posterImage.setImageDrawable(null);
-                initialsText.setVisibility(VISIBLE);
+                LogoLoader.clear(posterImage);
                 String trimmed = c.name.trim();
+                int local = isIntuitive ? IntuitiveArtwork.poster(trimmed) : 0;
+                if (local != 0) posterImage.setImageBitmap(Artwork.get(context, local, 240));
+                initialsText.setVisibility(local == 0 ? VISIBLE : GONE);
                 initialsText.setText(trimmed.length() > 2 ? trimmed.substring(0, 2).toUpperCase(Locale.ROOT) : trimmed.toUpperCase(Locale.ROOT));
             }
         }
@@ -982,15 +789,17 @@ public final class MediaBrowseView extends LinearLayout {
             this.item = null;
             titleText.setText(s.seriesTitle);
             int sc = s.getSeasonCount();
-            yearText.setText(s.year + " · " + sc + (sc == 1 ? " temp." : " temps."));
+            yearText.setText((s.year.isEmpty() ? "" : s.year + " · ") + sc + (sc == 1 ? " temp." : " temps."));
 
             if (s.logoUrl != null && !s.logoUrl.isEmpty()) {
                 initialsText.setVisibility(GONE);
                 LogoLoader.load(s.logoUrl, posterImage);
             } else {
-                posterImage.setImageDrawable(null);
-                initialsText.setVisibility(VISIBLE);
+                LogoLoader.clear(posterImage);
                 String trimmed = s.seriesTitle.trim();
+                int local = isIntuitive ? IntuitiveArtwork.poster(trimmed) : 0;
+                if (local != 0) posterImage.setImageBitmap(Artwork.get(context, local, 240));
+                initialsText.setVisibility(local == 0 ? VISIBLE : GONE);
                 initialsText.setText(trimmed.length() > 2 ? trimmed.substring(0, 2).toUpperCase(Locale.ROOT) : trimmed.toUpperCase(Locale.ROOT));
             }
         }

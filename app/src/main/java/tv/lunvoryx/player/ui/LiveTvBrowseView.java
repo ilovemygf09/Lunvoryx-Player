@@ -1,9 +1,7 @@
 package tv.lunvoryx.player.ui;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -13,25 +11,19 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import tv.lunvoryx.player.R;
 import tv.lunvoryx.player.data.Channel;
-import tv.lunvoryx.player.data.MediaKind;
 import tv.lunvoryx.player.data.PlaylistRepository;
 import tv.lunvoryx.player.epg.EpgRepository;
 import tv.lunvoryx.player.epg.Program;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 import static tv.lunvoryx.player.ui.TvStyle.dp;
 
 public final class LiveTvBrowseView extends LinearLayout {
@@ -40,28 +32,15 @@ public final class LiveTvBrowseView extends LinearLayout {
         void onToggleFavorite(Channel channel);
     }
 
-    private static class CategoryItem {
-        final String id;
-        final String label;
-        final String icon;
-        int count;
-        CategoryItem(String id, String label, String icon, int count) {
-            this.id = id;
-            this.label = label;
-            this.icon = icon;
-            this.count = count;
-        }
-    }
-
     private final Context context;
     private final PlaylistRepository repository;
     private final EpgRepository epgRepository;
     private final Listener listener;
     private final boolean isIntuitive;
 
-    private final List<Channel> fullChannels = new ArrayList<>();
-    private final List<CategoryItem> categories = new ArrayList<>();
-    private final List<Channel> filteredChannels = new ArrayList<>();
+    private final CatalogTask browseTask = new CatalogTask();
+    private boolean categoriesLoaded;
+    private List<Channel> filteredChannels = Collections.emptyList();
 
     private String selectedCatId = "all";
     private String selectedCatLabel = "Todas";
@@ -69,7 +48,7 @@ public final class LiveTvBrowseView extends LinearLayout {
     private int sortMode = 0; // 0: Original, 1: A-Z, 2: Z-A
 
     // UI elements
-    private LinearLayout categoriesContainer;
+    private CategoryList categoryList;
     private TextView catHeaderTitle;
     private TextView catHeaderBadge;
     private RecyclerView channelList;
@@ -77,7 +56,60 @@ public final class LiveTvBrowseView extends LinearLayout {
 
     // Preview Panel
     private ImageView previewLogo;
+    private android.view.TextureView previewVideo;
+    private androidx.media3.exoplayer.ExoPlayer previewPlayer;
+    private final Runnable startPreview = this::startVideoPreview;
+
+    private void stopVideoPreview() {
+        removeCallbacks(startPreview);
+        if (previewPlayer != null) {
+            previewPlayer.release();
+            previewPlayer = null;
+        }
+        if (previewVideo != null) previewVideo.setAlpha(0f);
+    }
+
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
+    private void startVideoPreview() {
+        Channel channel = currentSelectedChannel;
+        if (previewVideo == null || channel == null || !isShown() || !hasWindowFocus()) return;
+        stopVideoPreview();
+        androidx.media3.datasource.DefaultHttpDataSource.Factory http = new androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setUserAgent(channel.userAgent.isEmpty() ? "LunvoryxTV/1.0" : channel.userAgent);
+        if (!channel.referer.isEmpty()) http.setDefaultRequestProperties(java.util.Collections.singletonMap("Referer", channel.referer));
+        androidx.media3.exoplayer.ExoPlayer player = new androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                .setMediaSourceFactory(new androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                        new androidx.media3.datasource.DefaultDataSource.Factory(context, http))).build();
+        previewPlayer = player;
+        player.setVolume(0f);
+        if (channel.url.startsWith("asset:///demo/live/"))
+            player.setRepeatMode(androidx.media3.common.Player.REPEAT_MODE_ONE);
+        player.setVideoTextureView(previewVideo);
+        player.addListener(new androidx.media3.common.Player.Listener() {
+            @Override public void onRenderedFirstFrame() {
+                if (previewPlayer == player) previewVideo.setAlpha(1f);
+            }
+            @Override public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                if (previewPlayer == player) stopVideoPreview();
+            }
+        });
+        androidx.media3.common.MediaItem.Builder media = new androidx.media3.common.MediaItem.Builder().setUri(channel.url);
+        android.net.Uri uri = android.net.Uri.parse(channel.url);
+        if ("m3u8".equalsIgnoreCase(uri.getQueryParameter("output")))
+            media.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8);
+        player.setMediaItem(media.build());
+        player.prepare();
+        player.play();
+    }
+
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        stopVideoPreview();
+        if (focused && isIntuitive) postDelayed(startPreview, 650);
+    }
     private TextView previewLogoText;
+    private TextView liveBadge;
     private TextView previewTitle;
     private TextView previewProgram;
     private TextView previewSchedule;
@@ -104,7 +136,8 @@ public final class LiveTvBrowseView extends LinearLayout {
 
         setOrientation(VERTICAL);
         buildUi();
-        loadData();
+        clearPreview();
+        previewProgram.setText(AppStrings.isEnglish(context) ? "Loading channels…" : "Cargando canales…");
     }
 
     private void buildUi() {
@@ -165,7 +198,7 @@ public final class LiveTvBrowseView extends LinearLayout {
     private void buildCategoriesColumn(LinearLayout body) {
         LinearLayout colA = new LinearLayout(context);
         colA.setOrientation(VERTICAL);
-        colA.setBackground(TvStyle.squircleCard(context, 18));
+        colA.setBackground(isIntuitive ? IntuitivePanel.create(context) : TvStyle.squircleCard(context, 18));
         colA.setPadding(dp(context, 12), dp(context, 14), dp(context, 12), dp(context, 8));
 
         LinearLayout head = new LinearLayout(context);
@@ -186,13 +219,12 @@ public final class LiveTvBrowseView extends LinearLayout {
         head.addView(catTitle);
         colA.addView(head);
 
-        ScrollView scroller = new ScrollView(context);
-        scroller.setFillViewport(true);
-        scroller.setVerticalScrollBarEnabled(false);
-        categoriesContainer = new LinearLayout(context);
-        categoriesContainer.setOrientation(VERTICAL);
-        scroller.addView(categoriesContainer);
-        colA.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1));
+        categoryList = new CategoryList(context, this::applyCategoryRowStyle, item -> {
+            selectedCatId = item.id;
+            selectedCatLabel = item.label;
+            applyFilterAndSort();
+        });
+        colA.addView(categoryList, new LinearLayout.LayoutParams(-1, 0, 1));
 
         // Down scroll arrow hint
         LineIcon down = new LineIcon(context, "down");
@@ -202,7 +234,7 @@ public final class LiveTvBrowseView extends LinearLayout {
         dp.topMargin = dp(context, 4);
         colA.addView(down, dp);
 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, isIntuitive ? 220 : 190), -1);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(isIntuitive ? 0 : dp(context, 190), -1, isIntuitive ? .20f : 0);
         lp.rightMargin = dp(context, 10);
         body.addView(colA, lp);
     }
@@ -210,7 +242,7 @@ public final class LiveTvBrowseView extends LinearLayout {
     private void buildChannelsColumn(LinearLayout body) {
         LinearLayout colB = new LinearLayout(context);
         colB.setOrientation(VERTICAL);
-        colB.setBackground(TvStyle.squircleCard(context, 18));
+        colB.setBackground(isIntuitive ? IntuitivePanel.create(context) : TvStyle.squircleCard(context, 18));
         colB.setPadding(dp(context, 14), dp(context, 14), dp(context, 14), dp(context, 8));
 
         // Subheader: TV Icon + "Canales • [Category]" + Badge
@@ -314,6 +346,7 @@ public final class LiveTvBrowseView extends LinearLayout {
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1);
         lp.rightMargin = dp(context, 10);
+        if (isIntuitive) lp.weight = .47f;
         body.addView(colB, lp);
     }
 
@@ -329,7 +362,7 @@ public final class LiveTvBrowseView extends LinearLayout {
     private void buildPreviewColumn(LinearLayout body) {
         LinearLayout colC = new LinearLayout(context);
         colC.setOrientation(VERTICAL);
-        colC.setBackground(TvStyle.squircleCard(context, 18));
+        colC.setBackground(isIntuitive ? IntuitivePanel.create(context) : TvStyle.squircleCard(context, 18));
         colC.setPadding(dp(context, 14), dp(context, 14), dp(context, 14), dp(context, 14));
 
         LinearLayout head = new LinearLayout(context);
@@ -367,16 +400,22 @@ public final class LiveTvBrowseView extends LinearLayout {
         previewLogoText.setGravity(Gravity.CENTER);
         screenFrame.addView(previewLogoText, new FrameLayout.LayoutParams(-1, -1));
 
+        if (isIntuitive) {
+            previewVideo = new android.view.TextureView(context);
+            previewVideo.setAlpha(0f);
+            screenFrame.addView(previewVideo, new FrameLayout.LayoutParams(-1, -1));
+        }
+
         // Live badge: "● EN DIRECTO"
-        TextView liveBadge = new TextView(context);
+        liveBadge = new TextView(context);
         liveBadge.setText("● " + (AppStrings.isEnglish(context) ? "LIVE" : "EN DIRECTO"));
         liveBadge.setTextSize(10);
         liveBadge.setTextColor(0xFFFFFFFF);
         liveBadge.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         liveBadge.setPadding(dp(context, 8), dp(context, 3), dp(context, 8), dp(context, 3));
         liveBadge.setBackground(TvStyle.squircleSolid(context, 10, 0xFFE50914));
-        FrameLayout.LayoutParams lbp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
-        lbp.setMargins(dp(context, 10), dp(context, 10), 0, 0);
+        FrameLayout.LayoutParams lbp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
+        lbp.setMargins(0, dp(context, 10), dp(context, 10), 0);
         screenFrame.addView(liveBadge, lbp);
 
         colC.addView(screenFrame, new LinearLayout.LayoutParams(-1, dp(context, 140)));
@@ -390,14 +429,12 @@ public final class LiveTvBrowseView extends LinearLayout {
         LinearLayout names = new LinearLayout(context);
         names.setOrientation(VERTICAL);
         previewTitle = new TextView(context);
-        previewTitle.setText("La 1 HD");
         previewTitle.setTextSize(16);
         previewTitle.setTextColor(0xFFFFFFFF);
         previewTitle.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         names.addView(previewTitle);
 
         previewProgram = new TextView(context);
-        previewProgram.setText("Telediario 2");
         previewProgram.setTextSize(12);
         previewProgram.setTextColor(0xFF8F91A2);
         names.addView(previewProgram);
@@ -410,13 +447,11 @@ public final class LiveTvBrowseView extends LinearLayout {
         timeRow.setPadding(0, dp(context, 6), 0, dp(context, 4));
 
         previewSchedule = new TextView(context);
-        previewSchedule.setText("20:00 - 21:00");
         previewSchedule.setTextSize(11);
         previewSchedule.setTextColor(0xFFCACBD4);
         timeRow.addView(previewSchedule, new LinearLayout.LayoutParams(0, -2, 1));
 
         previewRemaining = new TextView(context);
-        previewRemaining.setText("Quedan 25 min");
         previewRemaining.setTextSize(11);
         previewRemaining.setTextColor(0xFF8F91A2);
         timeRow.addView(previewRemaining);
@@ -453,6 +488,7 @@ public final class LiveTvBrowseView extends LinearLayout {
         }
         btnPlay.setOnClickListener(v -> {
             if (currentSelectedChannel != null && listener != null) {
+                stopVideoPreview();
                 listener.onPlay(currentSelectedChannel, filteredChannels, filteredChannels.indexOf(currentSelectedChannel));
             }
         });
@@ -511,13 +547,11 @@ public final class LiveTvBrowseView extends LinearLayout {
         nextDetail.setPadding(0, dp(context, 6), 0, 0);
 
         nextTime = new TextView(context);
-        nextTime.setText("21:00");
         nextTime.setTextSize(11);
         nextTime.setTextColor(0xFF8F91A2);
         nextDetail.addView(nextTime);
 
         nextTitle = new TextView(context);
-        nextTitle.setText("El tiempo");
         nextTitle.setTextSize(11);
         nextTitle.setTextColor(0xFFF8F8FB);
         nextTitle.setPadding(dp(context, 10), 0, 0, 0);
@@ -528,62 +562,50 @@ public final class LiveTvBrowseView extends LinearLayout {
 
         colC.addView(nextCard);
 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, isIntuitive ? 320 : 252), -1);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(isIntuitive ? 0 : dp(context, 252), -1, isIntuitive ? .33f : 0);
         body.addView(colC, lp);
     }
 
+    private boolean focusFirstWhenReady;
+    private View entryFocus;
+
     public void requestFocusFirstItem() {
-        post(() -> {
-            if (channelList != null) {
-                View first = channelList.getChildAt(0);
-                if (first != null) first.requestFocus();
-                else channelList.requestFocus();
-            }
-        });
+        focusFirstWhenReady = true;
+        entryFocus = getRootView().findFocus();
+        if (categoriesLoaded) focusFirstAfterLayout();
     }
 
-    private void loadData() {
-        fullChannels.clear();
-        fullChannels.addAll(repository.getLiveChannels());
+    private void focusFirstAfterLayout() {
+        if (!focusFirstWhenReady) return;
+        focusFirstWhenReady = false;
+        View originalFocus = entryFocus;
+        entryFocus = null;
+        CategoryList.focusFirstAfterLayout(channelList, originalFocus);
+    }
 
-        buildCategoryList();
-        renderCategories();
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
         applyFilterAndSort();
     }
 
-    private void buildCategoryList() {
-        categories.clear();
-        Set<String> favIds = repository.getFavoriteIds();
-        Set<String> recents = new HashSet<>(repository.getRecentIds());
+    @Override protected void onDetachedFromWindow() {
+        stopVideoPreview();
+        browseTask.cancel();
+        super.onDetachedFromWindow();
+    }
 
-        // 1. Todas
-        categories.add(new CategoryItem("all", AppStrings.isEnglish(context) ? "All" : "Todas", "all_grid", fullChannels.size()));
-
-        // 2. Favoritos
-        int favCount = 0;
-        for (Channel c : fullChannels) if (favIds.contains(c.id)) favCount++;
-        categories.add(new CategoryItem("favorites", AppStrings.isEnglish(context) ? "Favorites" : "Favoritos", "star", favCount));
-
-        // 3. Seguir viendo (Recientes)
-        int recentCount = 0;
-        for (Channel c : fullChannels) if (recents.contains(c.id)) recentCount++;
-        categories.add(new CategoryItem("recents", AppStrings.isEnglish(context) ? "Keep watching" : "Seguir viendo", "resume", recentCount));
-
-        // Groups from playlist
-        Map<String, Integer> groupCounts = new HashMap<>();
-        for (Channel c : fullChannels) {
-            String g = (c.group == null || c.group.trim().isEmpty()) ? (AppStrings.isEnglish(context) ? "General" : "General") : c.group.trim();
-            Integer cnt = groupCounts.get(g);
-            groupCounts.put(g, (cnt != null ? cnt : 0) + 1);
+    private void showCategoryCounts(BrowseFilter.Counts counts) {
+        List<CategoryList.Item> categories = new ArrayList<>(counts.groups.size() + 3);
+        boolean english = AppStrings.isEnglish(context);
+        categories.add(new CategoryList.Item("all", english ? "All" : "Todas", "all_grid", counts.total));
+        categories.add(new CategoryList.Item("favorites", english ? "Favorites" : "Favoritos", "star", counts.favorites));
+        categories.add(new CategoryList.Item("resume", english ? "Keep watching" : "Seguir viendo", "resume", counts.recent));
+        for (Map.Entry<String, Integer> entry : counts.groups.entrySet()) {
+            String group = entry.getKey();
+            categories.add(new CategoryList.Item("group:" + group, group, chooseIconForGroup(group), entry.getValue()));
         }
-
-        TreeSet<String> sortedGroups = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        sortedGroups.addAll(groupCounts.keySet());
-
-        for (String g : sortedGroups) {
-            String icon = chooseIconForGroup(g);
-            categories.add(new CategoryItem("group:" + g, g, icon, groupCounts.get(g)));
-        }
+        categoryList.show(categories, selectedCatId);
+        categoriesLoaded = true;
     }
 
     private String chooseIconForGroup(String g) {
@@ -598,67 +620,16 @@ public final class LiveTvBrowseView extends LinearLayout {
         return "tv";
     }
 
-    private void renderCategories() {
-        categoriesContainer.removeAllViews();
-        for (CategoryItem item : categories) {
-            LinearLayout row = new LinearLayout(context);
-            row.setOrientation(HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8));
-            row.setFocusable(true);
-            row.setClickable(true);
-
-            LineIcon icon = new LineIcon(context, item.icon);
-            row.addView(icon, new LinearLayout.LayoutParams(dp(context, 16), dp(context, 16)));
-
-            TextView label = new TextView(context);
-            label.setText(item.label);
-            label.setTextSize(12);
-            label.setSingleLine(true);
-            label.setEllipsize(TextUtils.TruncateAt.END);
-            label.setPadding(dp(context, 8), 0, dp(context, 6), 0);
-            row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
-
-            TextView count = new TextView(context);
-            count.setText(String.valueOf(item.count));
-            count.setTextSize(10);
-            count.setPadding(dp(context, 6), dp(context, 2), dp(context, 6), dp(context, 2));
-            GradientDrawable cbg = new GradientDrawable();
-            cbg.setColor(0xFF282A3A);
-            cbg.setCornerRadius(dp(context, 10));
-            count.setBackground(cbg);
-            row.addView(count);
-
-            boolean isSelected = selectedCatId.equals(item.id);
-            applyCategoryRowStyle(row, icon, label, count, isSelected, false);
-
-            row.setOnClickListener(v -> {
-                selectedCatId = item.id;
-                selectedCatLabel = item.label;
-                renderCategories();
-                applyFilterAndSort();
-            });
-
-            row.setOnFocusChangeListener((v, focused) -> {
-                applyCategoryRowStyle(row, icon, label, count, selectedCatId.equals(item.id), focused);
-            });
-
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.bottomMargin = dp(context, 4);
-            categoriesContainer.addView(row, lp);
-        }
-    }
-
     private void applyCategoryRowStyle(LinearLayout row, LineIcon icon, TextView label, TextView count, boolean selected, boolean focused) {
         if (isIntuitive) {
             if (selected || focused) {
-                row.setBackground(TvStyle.squircleSolid(context, 12, selected ? 0xFF007AFF : 0xFF1E2D4A));
+                row.setBackground(selected ? IntuitivePanel.button(context, focused) : IntuitivePanel.create(context));
                 icon.setColor(0xFFFFFFFF);
                 label.setTextColor(0xFFFFFFFF);
                 label.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
                 count.setTextColor(0xFFFFFFFF);
             } else {
-                row.setBackground(null);
+                row.setBackground(IntuitivePanel.create(context));
                 icon.setColor(0xFF7E8B9E);
                 label.setTextColor(0xFFCACBD4);
                 label.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
@@ -682,49 +653,41 @@ public final class LiveTvBrowseView extends LinearLayout {
     }
 
     private void applyFilterAndSort() {
-        filteredChannels.clear();
-        Set<String> favIds = repository.getFavoriteIds();
-        Set<String> recents = new HashSet<>(repository.getRecentIds());
-
-        for (Channel c : fullChannels) {
-            if ("favorites".equals(selectedCatId) && !favIds.contains(c.id)) continue;
-            if ("recents".equals(selectedCatId) && !recents.contains(c.id)) continue;
-            if (selectedCatId.startsWith("group:")) {
-                String groupName = selectedCatId.substring(6);
-                if (!groupName.equalsIgnoreCase(c.group)) continue;
-            }
-            if (!searchQuery.isEmpty()) {
-                String q = searchQuery.toLowerCase(Locale.ROOT);
-                if (!c.name.toLowerCase(Locale.ROOT).contains(q)) continue;
-            }
-            filteredChannels.add(c);
-        }
-
-        if (sortMode == 1) {
-            Collections.sort(filteredChannels, (a, b) -> a.name.compareToIgnoreCase(b.name));
-        } else if (sortMode == 2) {
-            Collections.sort(filteredChannels, (a, b) -> b.name.compareToIgnoreCase(a.name));
-        }
-
-        catHeaderTitle.setText("Canales • " + selectedCatLabel);
-        catHeaderBadge.setText(String.valueOf(filteredChannels.size()) + (AppStrings.isEnglish(context) ? " channels" : " canales"));
-        channelAdapter.notifyDataSetChanged();
-
-        if (!filteredChannels.isEmpty()) {
-            selectForPreview(filteredChannels.get(0));
-        } else {
-            clearPreview();
-        }
+        String category = selectedCatId, query = searchQuery;
+        int sort = sortMode;
+        boolean initial = !categoriesLoaded;
+        boolean english = AppStrings.isEnglish(context);
+        catHeaderBadge.setText(english ? "Loading…" : "Cargando…");
+        browseTask.submit(() -> BrowseFilter.CHANNELS.run(repository.getLiveChannels(), repository,
+                category, query, sort, initial), result -> {
+            if (initial) showCategoryCounts(result.counts);
+            filteredChannels = result.items;
+            catHeaderTitle.setText("Canales • " + selectedCatLabel);
+            catHeaderBadge.setText(filteredChannels.size() + (english ? " channels" : " canales"));
+            channelAdapter.notifyDataSetChanged();
+            if (filteredChannels.isEmpty()) clearPreview();
+            else selectForPreview(filteredChannels.get(0));
+            if (initial) focusFirstAfterLayout();
+        });
     }
 
     private void selectForPreview(Channel c) {
+        if (isIntuitive && currentSelectedChannel != c) {
+            stopVideoPreview();
+            postDelayed(startPreview, 650);
+        }
         currentSelectedChannel = c;
+        liveBadge.setText(c.url.startsWith("asset:///demo/") ? "DEMO" : (AppStrings.isEnglish(context) ? "● LIVE" : "● EN DIRECTO"));
+        liveBadge.setVisibility(VISIBLE);
+        btnPlay.setVisibility(VISIBLE);
+        btnFav.setVisibility(VISIBLE);
         previewTitle.setText(c.name);
 
         long nowTime = System.currentTimeMillis();
         Program now = epgRepository.now(c.tvgId.isEmpty() ? c.name : c.tvgId);
         Program next = epgRepository.next(c.tvgId.isEmpty() ? c.name : c.tvgId);
 
+        previewProgress.setVisibility(now == null ? GONE : VISIBLE);
         if (now != null) {
             previewProgram.setText(now.title);
             java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("HH:mm", Locale.getDefault());
@@ -737,8 +700,7 @@ public final class LiveTvBrowseView extends LinearLayout {
             previewRemaining.setText((AppStrings.isEnglish(context) ? "Remaining " : "Quedan ") + remainingMin + " min");
         } else {
             previewProgram.setText(c.group.isEmpty() ? (AppStrings.isEnglish(context) ? "Live broadcast" : "Emisión en directo") : c.group);
-            previewSchedule.setText("20:00 - 21:00");
-            previewProgress.setProgress(45);
+            previewSchedule.setText("");
             previewRemaining.setText(AppStrings.isEnglish(context) ? "Live" : "En directo");
         }
 
@@ -747,17 +709,26 @@ public final class LiveTvBrowseView extends LinearLayout {
             nextTime.setText(sdf.format(next.startMillis));
             nextTitle.setText(next.title);
         } else {
-            nextTime.setText("21:00");
-            nextTitle.setText(AppStrings.isEnglish(context) ? "Program info" : "Programación habitual");
+            nextTime.setText("");
+            nextTitle.setText(AppStrings.isEnglish(context) ? "Schedule unavailable" : "Sin información de programación");
         }
 
         updateFavButtonState();
 
-        if (!c.logoUrl.isEmpty()) {
+        if (isIntuitive && c.url.startsWith("asset:///demo/live/") && c.name.equals("DAZN LaLiga") && c.logoUrl.isEmpty()) {
+            LogoLoader.clear(previewLogo);
+            previewLogo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            previewLogo.setPadding(0, 0, 0, 0);
+            previewLogo.setImageBitmap(Artwork.get(context, R.drawable.intu_sport, 640));
+            previewLogoText.setVisibility(GONE);
+        } else if (!c.logoUrl.isEmpty()) {
+            previewLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            int inset = dp(context, 20);
+            previewLogo.setPadding(inset, inset, inset, inset);
             previewLogoText.setVisibility(GONE);
             LogoLoader.load(c.logoUrl, previewLogo);
         } else {
-            previewLogo.setImageDrawable(null);
+            LogoLoader.clear(previewLogo);
             previewLogoText.setVisibility(VISIBLE);
             String trimmed = c.name.trim();
             previewLogoText.setText(trimmed.length() > 2 ? trimmed.substring(0, 2).toUpperCase(Locale.ROOT) : trimmed.toUpperCase(Locale.ROOT));
@@ -772,12 +743,19 @@ public final class LiveTvBrowseView extends LinearLayout {
     }
 
     private void clearPreview() {
+        stopVideoPreview();
         currentSelectedChannel = null;
+        liveBadge.setVisibility(GONE);
+        previewProgress.setVisibility(GONE);
+        btnPlay.setVisibility(GONE);
+        btnFav.setVisibility(GONE);
+        nextTime.setText("");
+        nextTitle.setText("");
         previewTitle.setText("");
         previewProgram.setText(AppStrings.isEnglish(context) ? "No channels available" : "No hay canales disponibles");
         previewSchedule.setText("");
         previewRemaining.setText("");
-        previewLogo.setImageDrawable(null);
+        LogoLoader.clear(previewLogo);
         previewLogoText.setVisibility(GONE);
     }
 
@@ -824,7 +802,14 @@ public final class LiveTvBrowseView extends LinearLayout {
             row.setFocusable(true);
             row.setClickable(true);
             row.setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8));
-            row.setMinimumHeight(dp(context, 54));
+            row.setMinimumHeight(dp(context, isIntuitive ? 42 : 54));
+            if (isIntuitive) {
+                row.setPadding(dp(context, 10), dp(context, 3), dp(context, 10), dp(context, 3));
+                row.setBackground(IntuitivePanel.create(context));
+                RecyclerView.LayoutParams bounds = new RecyclerView.LayoutParams(-1, -2);
+                bounds.bottomMargin = dp(context, 3);
+                row.setLayoutParams(bounds);
+            }
 
             // Emblem / Logo frame
             logoFrame = new FrameLayout(context);
@@ -888,6 +873,7 @@ public final class LiveTvBrowseView extends LinearLayout {
 
             row.setOnClickListener(v -> {
                 if (item != null && listener != null) {
+                    stopVideoPreview();
                     listener.onPlay(item, filteredChannels, filteredChannels.indexOf(item));
                 }
             });
@@ -909,7 +895,7 @@ public final class LiveTvBrowseView extends LinearLayout {
                         timeView.setTextColor(0xFF14151B);
                     }
                 } else {
-                    row.setBackground(null);
+                    row.setBackground(isIntuitive ? IntuitivePanel.create(context) : null);
                     nameView.setTextColor(0xFFFFFFFF);
                     programView.setTextColor(0xFF8F91A2);
                     timeView.setTextColor(0xFF8F91A2);
@@ -934,17 +920,18 @@ public final class LiveTvBrowseView extends LinearLayout {
                 rowProgress.setVisibility(VISIBLE);
             } else {
                 programView.setText(c.group.isEmpty() ? (AppStrings.isEnglish(context) ? "Live TV" : "En directo") : c.group);
-                timeView.setText("21:00");
-                rowProgress.setProgress(40);
-                rowProgress.setVisibility(VISIBLE);
+                timeView.setText("");
+                rowProgress.setVisibility(GONE);
             }
 
             if (c.logoUrl != null && !c.logoUrl.isEmpty()) {
                 logoTextView.setVisibility(GONE);
                 LogoLoader.load(c.logoUrl, logoView);
             } else {
-                logoView.setImageDrawable(null);
-                logoTextView.setVisibility(VISIBLE);
+                LogoLoader.clear(logoView);
+                int local = isIntuitive && c.url.startsWith("asset:///demo/live/") ? IntuitiveArtwork.channel(c.tvgId) : 0;
+                if (local != 0) logoView.setImageBitmap(Artwork.get(context, local, 96));
+                logoTextView.setVisibility(local == 0 ? VISIBLE : GONE);
                 String trimmed = c.name.trim();
                 logoTextView.setText(trimmed.length() > 2 ? trimmed.substring(0, 2).toUpperCase(Locale.ROOT) : trimmed.toUpperCase(Locale.ROOT));
             }

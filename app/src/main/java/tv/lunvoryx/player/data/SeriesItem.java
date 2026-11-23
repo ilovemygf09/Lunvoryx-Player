@@ -22,7 +22,7 @@ public final class SeriesItem {
         this.seriesTitle = seriesTitle;
         this.group = group != null ? group : "";
         this.logoUrl = logoUrl != null ? logoUrl : "";
-        this.year = year != null && !year.isEmpty() ? year : "2026";
+        this.year = year != null ? year : "";
         this.representativeChannel = representativeChannel;
         this.allEpisodeChannels = allEpisodeChannels;
         this.seasonsMap = seasonsMap;

@@ -49,49 +49,55 @@ public final class IntuitiveHomeScreen extends LinearLayout {
         // Main Grid Row
         LinearLayout grid = new LinearLayout(context);
         grid.setOrientation(HORIZONTAL);
+        grid.setClipChildren(false);
+        setClipChildren(false);
         LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(-1, 0, 1.0f);
+        gp.topMargin = dp(context, 40);
+        gp.bottomMargin = dp(context, 30);
         addView(grid, gp);
 
         // 1. Left Giant Card: TV en vivo (44% width)
         liveCard = buildLiveTvCard();
-        LinearLayout.LayoutParams lcp = new LinearLayout.LayoutParams(0, -1, 0.44f);
+        LinearLayout.LayoutParams lcp = new LinearLayout.LayoutParams(0, -1, 0.46f);
         lcp.rightMargin = dp(context, 16);
         grid.addView(liveCard, lcp);
 
         // 2. Middle Column: Peliculas (top) + Recargar lista (bottom) (28% width)
         LinearLayout midCol = new LinearLayout(context);
         midCol.setOrientation(VERTICAL);
-        LinearLayout.LayoutParams mcp = new LinearLayout.LayoutParams(0, -1, 0.28f);
+        midCol.setClipChildren(false);
+        LinearLayout.LayoutParams mcp = new LinearLayout.LayoutParams(0, -1, 0.27f);
         mcp.rightMargin = dp(context, 16);
         grid.addView(midCol, mcp);
 
         FrameLayout moviesCard = buildImageCard("Películas", "movie", R.drawable.category_movies);
         moviesCard.setOnClickListener(v -> { if (listener != null) listener.onNavigate("Películas"); });
-        midCol.addView(moviesCard, new LinearLayout.LayoutParams(-1, 0, 0.64f));
+        midCol.addView(moviesCard, new LinearLayout.LayoutParams(-1, 0, 0.72f));
 
         View midSpacer = new View(context);
         midCol.addView(midSpacer, new LinearLayout.LayoutParams(-1, dp(context, 14)));
 
         FrameLayout reloadCard = buildActionCard("Recargar lista", "refresh", 0xFF0E1A34);
         reloadCard.setOnClickListener(v -> { if (listener != null) listener.onReloadPlaylist(); });
-        midCol.addView(reloadCard, new LinearLayout.LayoutParams(-1, 0, 0.36f));
+        midCol.addView(reloadCard, new LinearLayout.LayoutParams(-1, 0, 0.28f));
 
         // 3. Right Column: Series (top) + Ajustes (bottom) (28% width)
         LinearLayout rightCol = new LinearLayout(context);
         rightCol.setOrientation(VERTICAL);
-        LinearLayout.LayoutParams rcp = new LinearLayout.LayoutParams(0, -1, 0.28f);
+        rightCol.setClipChildren(false);
+        LinearLayout.LayoutParams rcp = new LinearLayout.LayoutParams(0, -1, 0.27f);
         grid.addView(rightCol, rcp);
 
-        FrameLayout seriesCard = buildImageCard("Series", "series", R.drawable.category_series);
+        FrameLayout seriesCard = buildImageCard("Series", "series", R.drawable.category_live);
         seriesCard.setOnClickListener(v -> { if (listener != null) listener.onNavigate("Series"); });
-        rightCol.addView(seriesCard, new LinearLayout.LayoutParams(-1, 0, 0.64f));
+        rightCol.addView(seriesCard, new LinearLayout.LayoutParams(-1, 0, 0.72f));
 
         View rightSpacer = new View(context);
         rightCol.addView(rightSpacer, new LinearLayout.LayoutParams(-1, dp(context, 14)));
 
         FrameLayout settingsCard = buildActionCard("Ajustes", "settings", 0xFF0E1A34);
         settingsCard.setOnClickListener(v -> { if (listener != null) listener.onOpenSettings(); });
-        rightCol.addView(settingsCard, new LinearLayout.LayoutParams(-1, 0, 0.36f));
+        rightCol.addView(settingsCard, new LinearLayout.LayoutParams(-1, 0, 0.28f));
 
         // Setup D-pad focus flow
         liveCard.setId(View.generateViewId());
@@ -140,19 +146,20 @@ public final class IntuitiveHomeScreen extends LinearLayout {
         card.setFocusable(true);
         card.setClickable(true);
         card.setBackground(TvStyle.squircleCard(context, 20));
-        card.setClipToOutline(true);
+        IntuitivePanel.outline(card, 14);
+        IntuitivePanel.focusRing(card, false);
 
         // Background photo (stadium or category_live)
         ImageView bg = new ImageView(context);
-        bg.setImageBitmap(Artwork.get(context, R.drawable.category_live, 900));
+        bg.setImageBitmap(Artwork.get(context, R.drawable.intu_stadium, 900));
         bg.setScaleType(ImageView.ScaleType.CENTER_CROP);
         card.addView(bg, new FrameLayout.LayoutParams(-1, -1));
 
         // Vignette gradient
         View shade = new View(context);
         shade.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x22050B18, 0x880A1226, 0xE0050A16}
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0xAF031022, 0x33081428, 0x050A1628}
         ));
         card.addView(shade, new FrameLayout.LayoutParams(-1, -1));
 
@@ -192,14 +199,16 @@ public final class IntuitiveHomeScreen extends LinearLayout {
 
         TextView title = new TextView(context);
         title.setText("TV en vivo");
-        title.setTextSize(32);
+        title.setTextSize(38);
         title.setTextColor(0xFFFFFFFF);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
         tp.topMargin = dp(context, 10);
         center.addView(title, tp);
 
-        card.addView(center, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        FrameLayout.LayoutParams label = new FrameLayout.LayoutParams(-2, -2, Gravity.START | Gravity.CENTER_VERTICAL);
+        label.leftMargin = dp(context, 22);
+        card.addView(center, label);
 
         card.setOnClickListener(v -> {
             if (listener != null) listener.onNavigate("TV en vivo");
@@ -208,6 +217,7 @@ public final class IntuitiveHomeScreen extends LinearLayout {
         card.setOnFocusChangeListener((v, f) -> {
             v.animate().scaleX(f ? 1.025f : 1.0f).scaleY(f ? 1.025f : 1.0f).setDuration(130).start();
             ((SquircleGlassDrawable) v.getBackground()).setFocused(f);
+            IntuitivePanel.focusRing(v, f);
         });
 
         return card;
@@ -218,7 +228,8 @@ public final class IntuitiveHomeScreen extends LinearLayout {
         card.setFocusable(true);
         card.setClickable(true);
         card.setBackground(TvStyle.squircleCard(context, 18));
-        card.setClipToOutline(true);
+        IntuitivePanel.outline(card, 14);
+        IntuitivePanel.focusRing(card, false);
 
         ImageView bg = new ImageView(context);
         bg.setImageBitmap(Artwork.get(context, resId, 700));
@@ -227,8 +238,8 @@ public final class IntuitiveHomeScreen extends LinearLayout {
 
         View shade = new View(context);
         shade.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x33060B18, 0x990A1328, 0xEE050B18}
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0xA3061020, 0x44061222, 0x10060B18}
         ));
         card.addView(shade, new FrameLayout.LayoutParams(-1, -1));
 
@@ -249,11 +260,14 @@ public final class IntuitiveHomeScreen extends LinearLayout {
         tp.topMargin = dp(context, 8);
         center.addView(title, tp);
 
-        card.addView(center, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        FrameLayout.LayoutParams label = new FrameLayout.LayoutParams(-2, -2, Gravity.START | Gravity.CENTER_VERTICAL);
+        label.leftMargin = dp(context, 22);
+        card.addView(center, label);
 
         card.setOnFocusChangeListener((v, f) -> {
             v.animate().scaleX(f ? 1.035f : 1.0f).scaleY(f ? 1.035f : 1.0f).setDuration(130).start();
             ((SquircleGlassDrawable) v.getBackground()).setFocused(f);
+            IntuitivePanel.focusRing(v, f);
         });
 
         return card;
@@ -287,6 +301,7 @@ public final class IntuitiveHomeScreen extends LinearLayout {
         card.setOnFocusChangeListener((v, f) -> {
             v.animate().scaleX(f ? 1.04f : 1.0f).scaleY(f ? 1.04f : 1.0f).setDuration(130).start();
             ((SquircleGlassDrawable) v.getBackground()).setFocused(f);
+            IntuitivePanel.focusRing(v, f);
         });
 
         return card;
